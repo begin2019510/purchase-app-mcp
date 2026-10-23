@@ -169,9 +169,11 @@ npx -y github:begin2019510/purchase-app-mcp login    # 重新登录
 
 写操作全部走 App 真实业务 API，服务端的状态联动（审批、待办生成、分期、预算规则等）照常生效。
 
-### 已知限制
+### 阶段工具与版本要求
 
-当前 App 公网部署（Cloudflare Pages Functions）尚未暴露 `/api/phases`，因此 `phase.status.set` 会返回明确错误；`phase.list` 正常（读取 `/api/projects` 内嵌的阶段）。仓库内的 [`app-patch/functions/api/phases.js`](app-patch/functions/api/phases.js) 是缺失的一文件补丁：把它复制到 App 仓库的 `functions/api/phases.js` 并部署后，该工具即可用。
+`phase.list` 与 `phase.status.set` 都走 App 公网 API。**App v4.0.52+** 已部署 `/api/phases` 与 `/api/phase-items`，阶段状态/规划时间/交付物均可用。
+
+如果调用返回「接口返回了网页而不是 JSON」，说明目标 App 的部署版本过旧（缺少阶段端点）；先升级 App。旧部署也可临时使用仓库内的 [`app-patch/functions/api/phases.js`](app-patch/functions/api/phases.js) 补丁，但不再推荐。
 
 ## 数据与隐私
 
