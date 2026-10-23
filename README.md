@@ -4,6 +4,17 @@
 
 每个安装实例用自己的 App 账号登录，凭据只存本机；**仓库里没有任何硬编码 token / 密码 / 服务端密钥**。
 
+## 给 agent：skill 链接（推荐）
+
+把下面任一链接发给 agent：
+
+- <https://github.com/begin2019510/purchase-app-mcp/blob/main/skills/purchase-app/SKILL.md>
+- raw：`https://raw.githubusercontent.com/begin2019510/purchase-app-mcp/main/skills/purchase-app/SKILL.md`
+
+agent 读取后会执行 `npx -y github:begin2019510/purchase-app-mcp setup`：自动注册 MCP、把 skill 安装到 `~/.claude/skills/purchase-app/`，然后引导用户完成一次登录。
+
+> MCP 提供工具，skill 提供「安装 + 登录 + 验证 + 安全使用」步骤。skill 本身不接触密码或 token。
+
 ## 安全模型（如何保证受信）
 
 | 保证 | 做法 |
@@ -20,10 +31,35 @@
 
 ## 安装
 
-### Claude Code
+### 一键 setup（推荐）
 
 ```bash
-claude mcp add purchase-app -- npx -y github:begin2019510/purchase-app-mcp
+npx -y github:begin2019510/purchase-app-mcp setup
+```
+
+- Claude Code：用官方 CLI 注册为用户级 MCP，并安装 skill；
+- 已注册则跳过，幂等；
+- 只写配置和 skill，不登录、不写凭据；
+- 其他 agent / 只看配置：
+
+```bash
+npx -y github:begin2019510/purchase-app-mcp setup --print
+```
+
+输出纯 JSON（`mcpServers.purchase-app` + skill 路径/链接 + 命令），不写任何文件。也可以直接写指定的 JSON 配置：
+
+```bash
+npx -y github:begin2019510/purchase-app-mcp setup --agent json --config <配置文件路径>
+```
+
+每个 agent 独立凭据：加 `--home <独立目录>`，然后分别登录。
+
+### Claude Code（手动）
+
+```bash
+claude mcp add purchase-app -s user \
+  -e PURCHASE_APP_MCP_HOME=$HOME/.config/purchase-app-mcp \
+  -- npx -y github:begin2019510/purchase-app-mcp
 ```
 
 ### 通用 MCP 客户端（JSON）
