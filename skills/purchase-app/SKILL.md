@@ -27,7 +27,7 @@ npx -v
 
 ## 2. 自动安装（幂等）
 
-优先执行：
+**Claude Code**（安装 MCP + skill）：
 
 ```bash
 npx -y github:begin2019510/purchase-app-mcp setup
@@ -35,23 +35,23 @@ npx -y github:begin2019510/purchase-app-mcp setup
 
 它会：
 
-- 在 Claude Code 中把 `purchase-app` 注册为用户级 MCP（已存在则跳过）；
+- 在 Claude Code 中把 `purchase-app` 注册为用户级 MCP（已存在且配置一致则跳过）；
 - 把本 skill 安装到 `~/.claude/skills/purchase-app/SKILL.md`；
 - 打印登录和重启步骤。
 
-其他 agent / 不想自动改配置：
+**其他 agent**（不想自动改 `~/.claude.json`）：先取配置，再写入该 agent 自己的 MCP 配置：
 
 ```bash
 npx -y github:begin2019510/purchase-app-mcp setup --print
 ```
 
-`--print` 只输出 JSON（`mcpServers.purchase-app` 配置 + skill 源/目标路径 + 命令），不会写任何文件。把 `mcpServers` 条目写入该 agent 的 MCP 配置即可。也可以指定 JSON 配置文件：
+`--print` 只输出 JSON（`mcpServers.purchase-app` 配置 + skill 源/目标路径 + 命令），不会写任何文件。把 `mcpServers` 条目写入该 agent 的 MCP 配置；skill 可从 `skill.pageUrl`/`skill.sourceUrl` 获取。也可以指定 JSON 配置文件：
 
 ```bash
 npx -y github:begin2019510/purchase-app-mcp setup --agent json --config <该 agent 的 mcp 配置文件>
 ```
 
-每个 agent 要独立凭据时，加 `--home <独立目录>`（或设置 `PURCHASE_APP_MCP_HOME`），并分别登录。
+每个 agent 要独立凭据时，加 `--home <独立目录>`（或设置 `PURCHASE_APP_MCP_HOME`），并分别登录；skill 目录不同时加 `--skill-dir <该 agent 的 skills 目录>`。
 
 ## 3. 登录（必须，由用户完成）
 
