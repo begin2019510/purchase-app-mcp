@@ -1,0 +1,43 @@
+{
+  "name": "purchase-app-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for the 个人管家 purchase/expense/todo/project/budget app — per-install login, no shared token",
+  "type": "commonjs",
+  "main": "server.js",
+  "bin": {
+    "purchase-app-mcp": "bin/purchase-app-mcp.js"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "tools/",
+    "server.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "login": "node bin/purchase-app-mcp.js login",
+    "status": "node bin/purchase-app-mcp.js status",
+    "test": "node test/e2e.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "purchase",
+    "expense",
+    "budget"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/begin2019510/purchase-app-mcp.git"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "zod": "^4.6.7"
+  }
+}
