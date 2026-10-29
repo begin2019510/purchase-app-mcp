@@ -1,6 +1,6 @@
 ---
 name: purchase-app
-description: 安装、登录并使用购买 App MCP（采购/记账/待办/项目/预算/统计）。当用户要安装 purchase-app MCP、或要查询/修改购买 App 数据时使用。
+description: 安装、登录并使用购买 App MCP（采购/记账/待办/项目/预算/统计）。当用户要安装 purchase-app MCP、拿到 agent.html 安装链接、或要查询/修改购买 App 数据时使用。
 ---
 
 # 购买 App MCP：安装与使用
@@ -15,6 +15,35 @@ description: 安装、登录并使用购买 App MCP（采购/记账/待办/项�
 - 未经用户明确同意，不执行写操作、删除、批量修改；安装后先只读验证。
 - 修改 agent 配置前先备份；不修改与安装无关的配置。
 - 不要自行重启 ttyd/tmux 等父进程；重启命令交给用户在独立会话执行。
+
+## 0. 先判断授权方式（由 agent 自己选）
+
+| 用户给了什么 | 怎么做 |
+|---|---|
+| App 生成的安装链接（`https://…/agent.html#t=…`） | 直接走「1. 安装链接」全自动流程，**不要**再让用户登录 |
+| 没有链接，但本机能开浏览器 | 走「2. 自动安装」+「3. 本机登录」（`login` 会自动打开浏览器） |
+| 没有链接，且是无桌面的远程服务器 | 请用户打开 App →「设置 → 连接 Agent（MCP）」生成链接发来，然后走「1」；不要让用户把密码发到聊天里 |
+
+### 安装链接流程（全自动，不需要密码）
+
+```bash
+npx -y github:begin2019510/purchase-app-mcp install "<用户给的链接>"
+```
+
+一条命令完成：注册 MCP、安装 skill、用票据换取本安装实例独立的凭据、用 `purchase.list` 做只读验证。看到 `INSTALL_OK` 即成功。
+
+- 链接 **10 分钟内有效、只能使用一次**；失败或被使用过就请用户在 App 里重新生成。
+- 票据放在 URL 的 `#` 片段里，不会随请求发给服务器；也不要把它转存到文件、日志或聊天记录里。
+- 全程不需要、也不应索要用户的 App 密码。
+- 每个 agent 用各自生成的链接 → 各自独立的 refresh token，可单独 `logout` 吊销。
+
+已登录的安装可以为另一个 agent 生成链接：
+
+```bash
+npx -y github:begin2019510/purchase-app-mcp link
+```
+
+输出 JSON：`{ ok, url, expiresAt, command }`，把 `url` 交给另一个 agent 即可。
 
 ## 1. 检查环境
 
@@ -61,10 +90,10 @@ npx -y github:begin2019510/purchase-app-mcp setup --agent json --config <该 age
 npx -y github:begin2019510/purchase-app-mcp status
 ```
 
-若显示未登录：
+若显示未登录（且用户没有提供安装链接）：
 
-- **本机有浏览器**：让用户在自己的终端运行 `npx -y github:begin2019510/purchase-app-mcp login`，打开它打印的 `http://127.0.0.1:<port>/login/<一次性串>`，输入 App 账号（默认 `admin`）和密码。
-- **远程服务器/无浏览器**：让用户在独立 SSH 终端执行：
+- **本机有浏览器**：运行 `npx -y github:begin2019510/purchase-app-mcp login`。有图形界面时会自动打开登录页；否则打印 `http://127.0.0.1:<port>/login/<一次性串>`，让用户自己打开并输入 App 账号（默认 `admin`）和密码。
+- **远程服务器/无浏览器**：优先请用户在 App 里生成一次性安装链接，改用 `install <链接>`。也可以用独立 SSH 终端执行：
 
   ```bash
   read -rs PURCHASE_APP_PASSWORD
@@ -102,7 +131,8 @@ npx -y github:begin2019510/purchase-app-mcp status
 
   它会删除本机凭据并吊销服务端该 refresh token。
 
-- 未登录 / 401：重新执行 `login`。
+- 未登录 / 401：重新执行 `login`，或用新的安装链接重新 `install`。
+- `install` 提示「安装链接无效、已过期或已被使用」：链接 10 分钟有效且只能兑换一次。请用户在 App「设置 → 连接 Agent（MCP）」重新生成，不要重试旧链接。
 - 凭据与当前 `PURCHASE_APP_BASE_URL` 不匹配：重新 `login`，或改回原地址。
 - 多个 agent 共用同一凭据目录也能工作（刷新令牌有跨进程锁），但要**单独吊销**就给每个 agent 设置不同的 `PURCHASE_APP_MCP_HOME`。
 - 审计日志：`~/.config/purchase-app-mcp/audit.log`（0600），记录工具调用，参数已脱敏。

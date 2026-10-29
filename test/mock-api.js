@@ -4,10 +4,14 @@ const http = require('http');
 const { URL } = require('url');
 
 let currentRefresh = 'rt1';
+const refreshTokens = new Set(['rt1']); // 同一账号可同时持有多个会话的 refresh token
 let validAccess = new Set(['jwt1']);
 let seq = 1;
 let refreshCount = 0;
 let logoutCount = 0;
+let ticketSeq = 0;
+const agentTickets = new Map(); // ticket -> { used:false }
+const installRefresh = new Set(); // 安装链接签发的独立 refresh token（可与 primary 并存）
 
 function json(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -55,25 +59,59 @@ const server = http.createServer(async (req, res) => {
         validAccess.clear();
         validAccess.add('jwt_login_' + seq);
         currentRefresh = 'rt_' + (seq++);
+        refreshTokens.add(currentRefresh);
         return json(res, 200, { ok: true, token: [...validAccess][0], refreshToken: currentRefresh, username: 'admin' });
       }
       return json(res, 401, { error: '用户名或密码错误' });
     }
     if (action === 'refresh') {
-      if (!body.refreshToken || body.refreshToken !== currentRefresh) {
+      const rt = body.refreshToken;
+      const primary = !!rt && refreshTokens.has(rt);
+      const installer = !!rt && installRefresh.has(rt);
+      if (!primary && !installer) {
         return json(res, 401, { error: 'Refresh token 无效或已过期' });
       }
       refreshCount++;
-      validAccess.clear();
       const t = 'jwt_refresh_' + (seq++);
       validAccess.add(t);
-      currentRefresh = 'rt_' + (seq++);
-      return json(res, 200, { ok: true, token: t, refreshToken: currentRefresh });
+      let next;
+      if (installer) {
+        // 安装凭据独立轮换，不影响主会话
+        installRefresh.delete(rt);
+        next = 'rt_install_' + (seq++);
+        installRefresh.add(next);
+      } else {
+        refreshTokens.delete(rt);
+        currentRefresh = 'rt_' + (seq++);
+        refreshTokens.add(currentRefresh);
+        next = currentRefresh;
+      }
+      return json(res, 200, { ok: true, token: t, refreshToken: next });
     }
     if (action === 'logout') {
       logoutCount++;
-      if (body.refreshToken && body.refreshToken === currentRefresh) currentRefresh = '';
+      if (body.refreshToken) {
+        refreshTokens.delete(body.refreshToken);
+        installRefresh.delete(body.refreshToken);
+        if (body.refreshToken === currentRefresh) currentRefresh = '';
+      }
       return json(res, 200, { ok: true });
+    }
+    if (action === 'agent-ticket') {
+      if (!validAccess.has(token)) return json(res, 401, { error: 'Unauthorized' });
+      const ticket = 'ticket_' + (++ticketSeq) + '_' + 'x'.repeat(32);
+      agentTickets.set(ticket, { used: false });
+      return json(res, 200, { ok: true, ticket, expiresAt: new Date(Date.now() + 600000).toISOString() });
+    }
+    if (action === 'agent-exchange') {
+      const rec = agentTickets.get(body.ticket);
+      if (!rec || rec.used) return json(res, 401, { error: '安装链接无效、已过期或已被使用' });
+      rec.used = true;
+      const rt = 'rt_install_' + (seq++);
+      const t = 'jwt_install_' + (seq++);
+      installRefresh.add(rt);
+      validAccess.add(t);
+      return json(res, 200, { ok: true, token: t, refreshToken: rt, username: 'admin' });
     }
     return json(res, 400, { error: 'Unknown action' });
   }

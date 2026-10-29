@@ -13,7 +13,7 @@ const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio
 
 const pkg = require('./package.json');
 const { AuthStore, resolveHomeDir } = require('./lib/store');
-const { PublicApi } = require('./lib/publicapi');
+const { PublicApi, normalizeBaseUrl } = require('./lib/publicapi');
 const { interactiveLogin } = require('./lib/login');
 const registerAllTools = require('./tools');
 
@@ -51,12 +51,27 @@ function findOnPath(cmd) {
   return cmd;
 }
 
-function mcpEntry(home) {
+function mcpEntry(home, local) {
+  if (local) {
+    // 从源码运行时直接指向本文件，避免本机访问 GitHub 慢导致 MCP 启动卡住
+    return {
+      command: process.execPath,
+      args: [path.join(__dirname, 'server.js')],
+      env: { PURCHASE_APP_MCP_HOME: home },
+    };
+  }
   return {
     command: findOnPath('npx'),
     args: ['-y', GITHUB_SPEC],
     env: { PURCHASE_APP_MCP_HOME: home },
   };
+}
+
+function argValue(argv, name) {
+  const i = argv.indexOf(name);
+  if (i < 0) return undefined;
+  const v = argv[i + 1];
+  return v && !v.startsWith('--') ? v : undefined;
 }
 
 function stamp() {
@@ -155,9 +170,11 @@ function setupNextSteps(home) {
     '',
     '凭据目录：' + home,
     '',
-    '下一步（需要用户完成）：',
-    '1) 登录（本机有浏览器）：',
+    '下一步（任选其一）：',
+    '1) 登录（本机有浏览器，会自动打开登录页）：',
     '     npx -y ' + GITHUB_SPEC + ' login',
+    '   或在 App「设置 → 连接 Agent」生成一次性安装链接后：',
+    '     npx -y ' + GITHUB_SPEC + ' install <链接>',
     '   无浏览器（在独立 SSH 终端执行）：',
     '     read -rs PURCHASE_APP_PASSWORD',
     '     export PURCHASE_APP_PASSWORD',
@@ -186,7 +203,9 @@ async function cmdSetup(argv) {
   const configFlag = flag('--config');
   const configPath = configFlag && configFlag !== true ? path.resolve(expandHome(configFlag)) : null;
   const force = argv.includes('--force');
-  const entry = mcpEntry(home);
+  const local = argv.includes('--local');
+  const quiet = argv.includes('--quiet');
+  const entry = mcpEntry(home, local);
   const skillSrc = path.join(__dirname, 'skills', SKILL_NAME, 'SKILL.md');
 
   if (printOnly || agent === 'generic') {
@@ -219,7 +238,7 @@ async function cmdSetup(argv) {
       (s.ok
         ? (s.changed ? '✅ 已安装 skill：' + s.target + (s.backup ? '\n   备份：' + s.backup : '') : 'ℹ️  skill 已是最新：' + s.target)
         : '⚠️  ' + s.error) + '\n' +
-      setupNextSteps(home)
+      (quiet ? '' : setupNextSteps(home))
     );
     return;
   }
@@ -240,7 +259,7 @@ async function cmdSetup(argv) {
     process.stdout.write(
       (r.changed ? '✅ 已写入 MCP 配置：' + file + (r.backup ? '\n   备份：' + r.backup : '') : 'ℹ️  MCP 配置已存在且一致：' + file) + '\n' +
       (s.ok ? (s.changed ? '✅ 已安装 skill：' + s.target : 'ℹ️  skill 已是最新：' + s.target) : '⚠️  ' + s.error) + '\n' +
-      setupNextSteps(home)
+      (quiet ? '' : setupNextSteps(home))
     );
     return;
   }
@@ -260,7 +279,7 @@ async function cmdSetup(argv) {
       execFileSync(claudeBin, [
         'mcp', 'add', 'purchase-app', '-s', 'user',
         '-e', 'PURCHASE_APP_MCP_HOME=' + home,
-        '--', entry.command, '-y', GITHUB_SPEC,
+        '--', entry.command, ...entry.args,
       ], { stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000, encoding: 'utf8' });
       regOutput = (existing.entry ? '✅ 已更新' : '✅ 已在') + ' Claude Code（User scope）注册 purchase-app\n';
     } catch (e) {
@@ -277,11 +296,17 @@ async function cmdSetup(argv) {
     (s.ok
       ? (s.changed ? '✅ 已安装 skill：' + s.target + (s.backup ? '\n   备份：' + s.backup : '') : 'ℹ️  skill 已是最新：' + s.target)
       : '⚠️  ' + s.error) + '\n' +
-    setupNextSteps(home)
+    (quiet ? '' : setupNextSteps(home))
   );
 }
 
+function applyHomeFlag(argv) {
+  const h = argValue(argv, '--home');
+  if (h) process.env.PURCHASE_APP_MCP_HOME = path.resolve(expandHome(h));
+}
+
 async function cmdLogin(argv) {
+  applyHomeFlag(argv);
   const { store, api } = buildRuntime();
   let username = '';
   const i = argv.indexOf('--username');
@@ -298,10 +323,117 @@ async function cmdLogin(argv) {
     process.stderr.write('使用 PURCHASE_APP_PASSWORD 登录（密码不会写入磁盘）…\n');
     out = await api.login(username, pw);
   } else {
-    out = await interactiveLogin({ api, username });
+    out = await interactiveLogin({ api, username, autoOpen: !argv.includes('--no-open') });
   }
   process.stdout.write('\n✅ 登录成功：' + out.username + '\n');
   process.stdout.write('凭据已保存（0600，仅 refresh token）：' + store.file + '\n');
+}
+
+// 解析 App 设置页生成的一次性安装链接（票据放在 #t= 片段里，不会随请求发给服务器）
+function parseInstallLink(input) {
+  const s = String(input || '').trim();
+  if (!s) return null;
+  let u = null;
+  try { u = new URL(s); } catch (e) { u = null; }
+  if (!u) {
+    return /^[A-Za-z0-9_-]{20,200}$/.test(s) ? { ticket: s, baseUrl: null } : null;
+  }
+  const hash = new URLSearchParams((u.hash || '').replace(/^#/, ''));
+  const ticket = hash.get('t') || hash.get('ticket') ||
+    u.searchParams.get('t') || u.searchParams.get('ticket');
+  if (!ticket || !/^[A-Za-z0-9_-]{20,200}$/.test(ticket)) return null;
+  return { ticket, baseUrl: /^https?:$/.test(u.protocol) ? u.origin : null };
+}
+
+function positionalArgs(argv, valueFlags) {
+  const out = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a.startsWith('--')) {
+      if (valueFlags.includes(a)) i++;
+      continue;
+    }
+    out.push(a);
+  }
+  return out;
+}
+
+// install <链接>：注册 MCP/装 skill → 用一次性票据换独立凭据 → 只读验证。
+// 全程不需要密码，也不需要用户做端口转发；适合把链接直接交给 agent。
+async function cmdInstall(argv) {
+  applyHomeFlag(argv);
+  const linkArg = positionalArgs(argv, ['--home', '--skill-dir', '--agent', '--config'])[0];
+  if (!linkArg) {
+    throw new Error('用法：purchase-app-mcp install <App 设置页生成的安装链接> [--home <目录>]');
+  }
+  const link = parseInstallLink(linkArg);
+  if (!link) {
+    throw new Error('无法从链接中识别安装票据。请完整复制 App 设置页生成的链接（形如 https://…/agent.html#t=…）。');
+  }
+
+  // 链接所属的 App 地址优先；若显式配置了不同地址则拒绝，避免把票据发给别的服务
+  if (link.baseUrl) {
+    const fromLink = normalizeBaseUrl(link.baseUrl);
+    if (process.env.PURCHASE_APP_BASE_URL) {
+      const configured = normalizeBaseUrl(process.env.PURCHASE_APP_BASE_URL);
+      if (configured !== fromLink) {
+        throw new Error('安装链接属于 ' + fromLink + '，但当前 PURCHASE_APP_BASE_URL 是 ' + configured + '；请先 unset 或改成同一地址。');
+      }
+    }
+    process.env.PURCHASE_APP_BASE_URL = fromLink;
+  }
+
+  const setupArgs = ['--quiet', '--home', resolveHomeDir()];
+  for (const name of ['--skill-dir', '--agent', '--config']) {
+    const v = argValue(argv, name);
+    if (v) setupArgs.push(name, v);
+  }
+  if (argv.includes('--local')) setupArgs.push('--local');
+  if (argv.includes('--force')) setupArgs.push('--force');
+
+  await cmdSetup(setupArgs);
+
+  const { store, api } = buildRuntime();
+  if (api.loggedIn) {
+    process.stderr.write('ℹ️  将用安装链接替换本机现有凭据（原账号：' + api.identityName() + '）\n');
+  }
+  const out = await api.exchangeAgentTicket(link.ticket);
+
+  process.stdout.write('\n✅ 安装并授权成功：' + out.username + '\n');
+  process.stdout.write('App 地址：' + api.baseUrl + '\n');
+  process.stdout.write('凭据已保存（0600，仅 refresh token）：' + store.file + '\n');
+
+  if (!argv.includes('--no-verify')) {
+    try {
+      const list = await api.get('/api/items');
+      const n = Array.isArray(list) ? list.length
+        : (list && Array.isArray(list.items) ? list.items.length : 0);
+      process.stdout.write('✅ 只读验证通过（采购记录 ' + n + ' 条）\n');
+    } catch (e) {
+      process.exitCode = 1;
+      process.stderr.write('⚠️  凭据已保存，但只读验证失败：' + e.message + '\n');
+    }
+  }
+
+  process.stdout.write('\n下一步：重启当前 agent 会话以加载 MCP（Claude Code 用 /mcp 确认），然后调用 purchase.list。\n');
+  process.stdout.write('INSTALL_OK username=' + out.username + ' base=' + api.baseUrl + '\n');
+}
+
+// link：已登录时生成一次性安装链接，发给另一个 agent 使用。
+async function cmdLink(argv) {
+  applyHomeFlag(argv);
+  const { api } = buildRuntime();
+  if (!api.loggedIn) {
+    throw new Error('当前未登录。请先运行 login，或在 App 设置页直接生成安装链接。');
+  }
+  const r = await api.createAgentTicket();
+  process.stdout.write(JSON.stringify({
+    ok: true,
+    url: r.url,
+    expiresAt: r.expiresAt,
+    command: 'npx -y ' + GITHUB_SPEC + ' install ' + JSON.stringify(r.url),
+  }, null, 2) + '\n');
+  process.stderr.write('\n把 url 发给 agent 即可（10 分钟内有效、只能使用一次）。\n');
 }
 
 async function cmdLogout() {
@@ -343,8 +475,9 @@ async function runStdio() {
   if (!api.loggedIn) {
     process.stderr.write(
       '\n[purchase-app-mcp] 尚未登录（或凭据与当前 App 地址不匹配）。\n' +
-      '数据工具会返回“未登录”错误，完成登录后即可使用：\n\n  ' +
-      (process.env.PURCHASE_APP_MCP_HOME ? 'purchase-app-mcp login' : NPX_LOGIN) + '\n\n'
+      '数据工具会返回“未登录”错误。可以：\n' +
+      '  1) 运行 ' + (process.env.PURCHASE_APP_MCP_HOME ? 'purchase-app-mcp login' : NPX_LOGIN) + ' 在本机网页登录\n' +
+      '  2) 在 App 设置页生成一次性安装链接，运行 install <链接>（无需密码）\n\n'
     );
     if (api.storeError) process.stderr.write('[purchase-app-mcp] ' + api.storeError + '\n');
   }
@@ -360,7 +493,9 @@ function usage() {
     '  purchase-app-mcp                以 stdio MCP 服务运行（agent 自动调用）\n' +
     '  purchase-app-mcp setup          自动注册 MCP 到 Claude Code 并安装 skill\n' +
     '  purchase-app-mcp setup --print  只输出 JSON 配置（其他 agent / 不写文件）\n' +
-    '  purchase-app-mcp login          在本机网页登录（浏览器输入 App 账号密码）\n' +
+    '  purchase-app-mcp install <链接> 用一次性安装链接自动完成注册、授权和只读验证\n' +
+    '  purchase-app-mcp link           已登录时生成一次性安装链接（给另一个 agent）\n' +
+    '  purchase-app-mcp login          在本机网页登录（有桌面会自动打开浏览器）\n' +
     '  purchase-app-mcp logout         删除本机凭据并吊销服务端 refresh token\n' +
     '  purchase-app-mcp status         查看登录状态与凭据路径\n\n' +
     '环境变量：\n' +
@@ -375,6 +510,8 @@ async function main() {
   const cmd = process.argv[2] || 'serve';
   if (cmd === 'serve' || cmd === 'stdio') return runStdio();
   if (cmd === 'setup') return cmdSetup(process.argv.slice(3));
+  if (cmd === 'install') return cmdInstall(process.argv.slice(3));
+  if (cmd === 'link') return cmdLink(process.argv.slice(3));
   if (cmd === 'login') return cmdLogin(process.argv.slice(3));
   if (cmd === 'logout') return cmdLogout();
   if (cmd === 'status') return cmdStatus();

@@ -1,7 +1,7 @@
 {
   "name": "purchase-app-mcp",
-  "version": "1.1.1",
-  "description": "MCP server for the 个人管家 purchase/expense/todo/project/budget app — per-install login, no shared token",
+  "version": "1.2.0",
+  "description": "MCP server for the 个人管家 purchase/expense/todo/project/budget app — install link or per-install login, no shared token",
   "type": "commonjs",
   "main": "server.js",
   "bin": {
@@ -13,6 +13,7 @@
     "tools/",
     "skills/",
     "server.js",
+    "AGENTS.md",
     "README.md",
     "LICENSE"
   ],

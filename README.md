@@ -4,7 +4,34 @@
 
 每个安装实例用自己的 App 账号登录，凭据只存本机；**仓库里没有任何硬编码 token / 密码 / 服务端密钥**。
 
-## 给 agent：skill 链接（推荐）
+## 给 agent：一次性安装链接（全自动，推荐）
+
+App **v3.0.1+** 的「设置 → 连接 Agent（MCP）」可以生成一条形如 `https://<你的App>/agent.html#t=<票据>` 的链接。把链接交给 agent，它只需要运行：
+
+```bash
+npx -y github:begin2019510/purchase-app-mcp install "<链接>"
+```
+
+这一条命令会：
+
+1. 注册 MCP 并安装 skill（等价于 `setup`）；
+2. 用票据向 App 换取**该安装实例独立**的 refresh token；
+3. 调用 `purchase.list` 做一次只读验证，成功时输出 `INSTALL_OK`。
+
+链接 **10 分钟内有效、只能兑换一次**；生成新链接会让该账号之前未使用的链接立即失效。票据放在 URL 的 `#` 片段中，不会随请求出现在服务器日志或 Referer 里。
+
+**全程不需要 App 密码**，agent 也不应索要密码。每个 agent 用各自生成的链接，就得到各自独立的凭据，可以单独 `logout` 吊销。
+
+已登录的安装也可以为另一个 agent 生成链接：
+
+```bash
+npx -y github:begin2019510/purchase-app-mcp link
+# 输出 JSON：{ "ok": true, "url": "...", "expiresAt": "...", "command": "..." }
+```
+
+给 agent 的完整安装/使用规则见 [AGENTS.md](AGENTS.md)。
+
+## 给 agent：skill 链接（另一种方式）
 
 把下面任一链接发给 agent：
 
@@ -23,6 +50,7 @@ agent 读取后会执行 `npx -y github:begin2019510/purchase-app-mcp setup`：�
 | 每安装独立凭据 | 每次登录换取独立的 refresh token（30 天，轮换），存本机 `auth.json`（0600） |
 | 不共享写死 token | 代码与仓库中无任何 token；登录用 App 账号密码，密码**不落盘、不写日志** |
 | 可单独吊销 | `logout` 删除本机凭据并吊销服务端该 refresh token，不影响其他安装 |
+| 安装链接安全 | 票据 32 字节随机数，数据库只存 SHA-256；10 分钟有效、原子单次兑换；生成新链接即作废旧链接；票据只在 URL 片段中，不随请求上传 |
 | 最小权限 | 只调用 App 已公开的业务 API；无用户管理、无部署/重启、无 shell、无数据库直连 |
 | 传输安全 | 只接受 HTTPS App 地址（本机调试才允许 `http://127.0.0.1`）；登录页只监听 127.0.0.1 |
 | 可审计 | 本机 `audit.log`（0600）记录每次工具调用，参数自动脱敏；App 侧另有操作日志 |
@@ -88,22 +116,28 @@ npm install
 node bin/purchase-app-mcp.js login
 ```
 
-## 登录（必须，一次即可）
+## 登录（有两条路，二选一）
+
+- **有安装链接**：用上面的 `install "<链接>"`，不需要密码，也不需要本机浏览器。
+- **本机登录**（没有链接时）：
 
 ```bash
 npx -y github:begin2019510/purchase-app-mcp login
 ```
 
-终端会打印一个 `http://127.0.0.1:<port>/login/<一次性随机串>` 地址。在浏览器打开，输入 App 账号（默认 `admin`）和密码即可。
+有图形界面（macOS、Windows、Linux 的 `DISPLAY`/`WAYLAND_DISPLAY`）时会自动打开浏览器；否则终端打印 `http://127.0.0.1:<port>/login/<一次性随机串>`，在浏览器打开并输入 App 账号（默认 `admin`）和密码。可用 `--no-open` 禁止自动打开。
 
 - 密码只用于向 App 的 HTTPS 登录接口换取 token，**不会保存**。
 - 只把 refresh token 写入 `~/.config/purchase-app-mcp/auth.json`（目录 0700、文件 0600）。
 - access token 24 小时有效、自动续期；refresh token 30 天有效、每次续期轮换。
 - 登录后无需重启 agent：MCP 进程会在下一次工具调用时自动读取新凭据。
 
-**无浏览器的服务器**（二选一）：
+**无浏览器的服务器**（推荐用安装链接，见文首；没有链接时二选一）：
 
 ```bash
+# 方式 0（推荐）：让用户在 App 设置页生成一次性安装链接，然后
+npx -y github:begin2019510/purchase-app-mcp install "<链接>"
+
 # 方式 1：SSH 端口转发（login 会打印实际端口）
 ssh -L 127.0.0.1:<port>:127.0.0.1:<port> user@server
 # 然后在本地浏览器打开 login 打印的地址
@@ -145,9 +179,11 @@ PURCHASE_APP_MCP_HOME=/home/me/.config/purchase-app-mcp/work-agent \
 ## 常用命令
 
 ```bash
-npx -y github:begin2019510/purchase-app-mcp status   # 查看登录状态、凭据路径
-npx -y github:begin2019510/purchase-app-mcp logout   # 删除本机凭据并吊销服务端 refresh token
-npx -y github:begin2019510/purchase-app-mcp login    # 重新登录
+npx -y github:begin2019510/purchase-app-mcp install "<链接>"  # 一次性链接：注册 + 授权 + 只读验证
+npx -y github:begin2019510/purchase-app-mcp link              # 生成给别人用的一次性安装链接
+npx -y github:begin2019510/purchase-app-mcp status            # 查看登录状态、凭据路径
+npx -y github:begin2019510/purchase-app-mcp logout            # 删除本机凭据并吊销服务端 refresh token
+npx -y github:begin2019510/purchase-app-mcp login             # 本机网页登录（有桌面自动开浏览器）
 ```
 
 ## 环境变量

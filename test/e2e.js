@@ -158,9 +158,77 @@ function runCli(args, env) {
   const statusOut2 = runCli(['status'], env2);
   assert(/登录状态:\s*未登录/.test(statusOut2), 'status 命令显示未登录');
 
+  // ---- 一次性安装链接：link → install → 独立凭据 ----
+  const HOME3 = fs.mkdtempSync(path.join(os.tmpdir(), 'pamcp-home3-'));
+  const cfgFile = path.join(HOME3, 'mcp-config.json');
+  const skillDir = path.join(HOME3, 'skills', 'purchase-app');
+  const env3 = { PURCHASE_APP_BASE_URL: base, PURCHASE_APP_MCP_HOME: HOME3 };
+
+  const linkOut = runCli(['link'], env1);
+  const linkDoc = JSON.parse(linkOut);
+  assert(linkDoc.ok && /\/agent\.html#t=[A-Za-z0-9_-]{20,}/.test(linkDoc.url), 'link 生成 /agent.html#t=… 一次性安装链接');
+  assert(/^npx -y github:begin2019510\/purchase-app-mcp install /.test(linkDoc.command), 'link 返回可直接交给 agent 的执行命令');
+  const ticket = /#t=([A-Za-z0-9_-]+)/.exec(linkDoc.url)[1];
+  const home1Token = JSON.parse(fs.readFileSync(authFile, 'utf8')).refreshToken;
+
+  const installOut = runCli([
+    'install', linkDoc.url,
+    '--home', HOME3,
+    '--agent', 'json',
+    '--config', cfgFile,
+    '--skill-dir', skillDir,
+    '--local',
+  ], env3);
+  assert(/INSTALL_OK username=admin/.test(installOut), 'install 用链接完成注册、授权与只读验证');
+  assert(/只读验证通过（采购记录 1 条）/.test(installOut), 'install 结束后执行只读验证');
+  assert(fs.existsSync(skillDir + '/SKILL.md') && fs.existsSync(cfgFile), 'install 同时安装 skill 并写入 MCP 配置');
+
+  const auth3 = path.join(HOME3, 'auth.json');
+  assert(fs.existsSync(auth3), 'install 写入本机凭据');
+  assert((fs.statSync(auth3).mode & 0o777) === 0o600, 'install 凭据权限为 0600');
+  const saved3 = JSON.parse(fs.readFileSync(auth3, 'utf8'));
+  assert(saved3.refreshToken !== home1Token, 'install 使用独立 refresh token（不影响原会话）');
+  assert(saved3.source === 'install-link', '凭据标记来源为 install-link');
+  assert(!JSON.stringify(saved3).includes(ticket), '安装票据不写入凭据文件');
+
+  const transport3 = new StdioClientTransport({ command: process.execPath, args: [BIN], env: { ...process.env, ...env3 } });
+  const client3 = new Client({ name: 'e2e-client-3', version: '1.0.0' });
+  await client3.connect(transport3);
+  const r3 = await client3.callTool({ name: 'purchase.list', arguments: {} });
+  assert(!r3.isError && JSON.parse(text(r3)).items.length === 1, '新安装实例可立即只读访问');
+  await client3.close();
+
+  // 主会话凭据未被安装流程影响
+  const r1b = await (async () => {
+    const c = new Client({ name: 'e2e-client-1b', version: '1.0.0' });
+    const t = new StdioClientTransport({ command: process.execPath, args: [BIN], env: { ...process.env, ...env1 } });
+    await c.connect(t);
+    const r = await c.callTool({ name: 'purchase.list', arguments: {} });
+    await c.close();
+    return r;
+  })();
+  assert(!r1b.isError, '原账号凭据在 install 之后仍可用');
+
+  let reuseErr = null;
+  try {
+    runCli(['install', linkDoc.url, '--home', HOME3, '--agent', 'json', '--config', cfgFile, '--skill-dir', skillDir, '--local'], env3);
+  } catch (e) {
+    reuseErr = e;
+  }
+  assert(reuseErr && /无效、已过期或已被使用/.test(reuseErr.stderr || ''), '同一安装链接不能重复使用');
+
+  let badErr = null;
+  try {
+    runCli(['install', 'https://example.com/agent.html#t=short', '--home', HOME3], env3);
+  } catch (e) {
+    badErr = e;
+  }
+  assert(badErr && /无法从链接中识别安装票据/.test(badErr.stderr || ''), '无效链接被拒绝且不发起兑换');
+
   mock.kill('SIGTERM');
   fs.rmSync(HOME1, { recursive: true, force: true });
   fs.rmSync(HOME2, { recursive: true, force: true });
+  fs.rmSync(HOME3, { recursive: true, force: true });
   console.log('\n✅ 全部端到端测试通过\n');
   process.exit(0);
 })().catch(e => {
