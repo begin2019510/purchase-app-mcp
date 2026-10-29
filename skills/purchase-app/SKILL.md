@@ -90,7 +90,7 @@ npx -y github:begin2019510/purchase-app-mcp status
 
 写操作：`purchase.create/update/delete`、`expense.*`、`todo.*`、`project.*`、`budget.save`、`recurring.update`、`cats.update`。执行前先向用户确认，删除和批量修改必须确认。
 
-注意：`phase.status.set` 依赖 App 公网的 `/api/phases`。App v4.0.52+ 已部署该端点；若返回“接口返回了网页而不是 JSON”，说明目标 App 版本过旧，**不要声称成功**，先让用户升级 App。
+注意：`phase.status.set` 依赖 App 公网的 `/api/phases`。App 3.0.0+（含此前 4.0.52–4.0.61）已部署该端点；若返回“接口返回了网页而不是 JSON”，说明目标 App 版本过旧，**不要声称成功**，先让用户升级 App。
 
 ## 6. 吊销与排障
 

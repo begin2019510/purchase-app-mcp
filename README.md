@@ -31,6 +31,8 @@ agent 读取后会执行 `npx -y github:begin2019510/purchase-app-mcp setup`：�
 
 ## 安装
 
+要求：Node.js >= 18.17；安装时需要能访问 GitHub 和 npm registry（本机 npm 已配置 npmmirror 时更快）。MCP 只访问你自己的 App 地址，不依赖本仓库的服务器。
+
 ### 一键 setup（推荐）
 
 ```bash
@@ -171,7 +173,7 @@ npx -y github:begin2019510/purchase-app-mcp login    # 重新登录
 
 ### 阶段工具与版本要求
 
-`phase.list` 与 `phase.status.set` 都走 App 公网 API。**App v4.0.52+** 已部署 `/api/phases` 与 `/api/phase-items`，阶段状态/规划时间/交付物均可用。
+`phase.list` 与 `phase.status.set` 都走 App 公网 API。**App 3.0.0+**（2026-10 版本线重置；此前 4.0.52–4.0.61 同样包含）已部署 `/api/phases` 与 `/api/phase-items`，阶段状态/规划时间/交付物均可用。
 
 如果调用返回「接口返回了网页而不是 JSON」，说明目标 App 的部署版本过旧（缺少阶段端点）；先升级 App。旧部署也可临时使用仓库内的 [`app-patch/functions/api/phases.js`](app-patch/functions/api/phases.js) 补丁，但不再推荐。
 
