@@ -436,14 +436,16 @@ async function cmdLink(argv) {
   process.stderr.write('\n把 url 发给 agent 即可（10 分钟内有效、只能使用一次）。\n');
 }
 
-async function cmdLogout() {
+async function cmdLogout(argv) {
+  applyHomeFlag(argv);
   const { store, api } = buildRuntime();
   await api.logout();
   process.stdout.write('✅ 已退出登录，本机凭据已删除：' + store.file + '\n');
   process.stdout.write('（App 服务端的 refresh token 也已尝试吊销）\n');
 }
 
-async function cmdStatus() {
+async function cmdStatus(argv) {
+  applyHomeFlag(argv);
   const { api } = buildRuntime();
   const s = api.status();
   process.stdout.write(
@@ -513,8 +515,8 @@ async function main() {
   if (cmd === 'install') return cmdInstall(process.argv.slice(3));
   if (cmd === 'link') return cmdLink(process.argv.slice(3));
   if (cmd === 'login') return cmdLogin(process.argv.slice(3));
-  if (cmd === 'logout') return cmdLogout();
-  if (cmd === 'status') return cmdStatus();
+  if (cmd === 'logout') return cmdLogout(process.argv.slice(3));
+  if (cmd === 'status') return cmdStatus(process.argv.slice(3));
   if (cmd === '--version' || cmd === '-v') { process.stdout.write(pkg.version + '\n'); return; }
   if (cmd === '--help' || cmd === '-h' || cmd === 'help') return usage();
   process.stderr.write('未知命令：' + cmd + '\n\n');

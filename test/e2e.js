@@ -209,6 +209,13 @@ function runCli(args, env) {
   })();
   assert(!r1b.isError, '原账号凭据在 install 之后仍可用');
 
+  // --home 必须覆盖环境变量：status/logout 也要作用在指定目录
+  const statusHome = runCli(['status', '--home', HOME3], env1);
+  assert(/登录状态:\s*已登录/.test(statusHome) && statusHome.includes(auth3), 'status --home 读取指定目录');
+  const logoutHome = runCli(['logout', '--home', HOME3], env1);
+  assert(/已退出登录/.test(logoutHome) && !fs.existsSync(auth3), 'logout --home 删除指定目录的凭据');
+  assert(fs.existsSync(authFile), 'logout --home 不影响环境变量里的其他安装');
+
   let reuseErr = null;
   try {
     runCli(['install', linkDoc.url, '--home', HOME3, '--agent', 'json', '--config', cfgFile, '--skill-dir', skillDir, '--local'], env3);
