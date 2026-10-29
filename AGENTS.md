@@ -6,7 +6,7 @@
 
 ## 最重要的一条
 
-**如果用户给了你一条形如 `https://<app>/agent.html#t=<票据>` 的安装链接，直接运行：**
+**如果用户给了你一条形如 `https://<app>/agent#t=<票据>` 的安装链接，直接运行：**
 
 ```bash
 npx -y github:begin2019510/purchase-app-mcp install "<链接>"

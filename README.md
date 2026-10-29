@@ -6,7 +6,7 @@
 
 ## 给 agent：一次性安装链接（全自动，推荐）
 
-App **v3.0.1+** 的「设置 → 连接 Agent（MCP）」可以生成一条形如 `https://<你的App>/agent.html#t=<票据>` 的链接。把链接交给 agent，它只需要运行：
+App **v3.0.1+** 的「设置 → 连接 Agent（MCP）」可以生成一条形如 `https://<你的App>/agent#t=<票据>` 的链接。把链接交给 agent，它只需要运行：
 
 ```bash
 npx -y github:begin2019510/purchase-app-mcp install "<链接>"

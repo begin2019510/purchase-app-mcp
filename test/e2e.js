@@ -166,7 +166,7 @@ function runCli(args, env) {
 
   const linkOut = runCli(['link'], env1);
   const linkDoc = JSON.parse(linkOut);
-  assert(linkDoc.ok && /\/agent\.html#t=[A-Za-z0-9_-]{20,}/.test(linkDoc.url), 'link 生成 /agent.html#t=… 一次性安装链接');
+  assert(linkDoc.ok && /\/agent(?:\.html)?#t=[A-Za-z0-9_-]{20,}/.test(linkDoc.url), 'link 生成 /agent#t=… 一次性安装链接');
   assert(/^npx -y github:begin2019510\/purchase-app-mcp install /.test(linkDoc.command), 'link 返回可直接交给 agent 的执行命令');
   const ticket = /#t=([A-Za-z0-9_-]+)/.exec(linkDoc.url)[1];
   const home1Token = JSON.parse(fs.readFileSync(authFile, 'utf8')).refreshToken;
@@ -219,7 +219,7 @@ function runCli(args, env) {
 
   let badErr = null;
   try {
-    runCli(['install', 'https://example.com/agent.html#t=short', '--home', HOME3], env3);
+    runCli(['install', 'https://example.com/agent#t=short', '--home', HOME3], env3);
   } catch (e) {
     badErr = e;
   }

@@ -368,7 +368,7 @@ async function cmdInstall(argv) {
   }
   const link = parseInstallLink(linkArg);
   if (!link) {
-    throw new Error('无法从链接中识别安装票据。请完整复制 App 设置页生成的链接（形如 https://…/agent.html#t=…）。');
+    throw new Error('无法从链接中识别安装票据。请完整复制 App 设置页生成的链接（形如 https://…/agent#t=…）。');
   }
 
   // 链接所属的 App 地址优先；若显式配置了不同地址则拒绝，避免把票据发给别的服务
