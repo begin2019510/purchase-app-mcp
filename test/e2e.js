@@ -79,14 +79,23 @@ function runCli(args, env) {
   const r1 = await client.callTool({ name: 'purchase.list', arguments: {} });
   assert(!r1.isError, '同一 MCP 进程在 CLI 登录后可直接使用');
   const list = JSON.parse(text(r1));
-  assert(list.items.length === 1 && list.items[0].name === '测试商品' && list.items[0].price === 99 && list.items[0].qty === 2, '读接口中文字段映射正确');
+  assert(list.items.length === 3 && list.items[0].name === '测试商品' && list.items[0].price === 99 && list.items[0].qty === 2, '读接口中文字段映射正确');
   assert(list.source === 'needs', 'purchase.list 优先读 /api/needs');
   assert(list.items[0].needStatus === '已定点' && list.items[0].legacyStatus === '已下单' && list.items[0].orderStatus === '已下单', 'need 状态与兼容状态分离');
   assert(Array.isArray(list.items[0].orders) && list.items[0].orders.length === 1 && Array.isArray(list.items[0].suppliers), '返回完整 orders/suppliers');
+  // 全量列表统一最新在前：无子单需求靠创建时间兜底排序
+  assert(list.items[1].name === '近期对比中' && list.items[2].name === '九月旧需求', '列表按日期倒序（createdAt 兜底）');
   const rStatusNeed = await client.callTool({ name: 'purchase.list', arguments: { status: '已定点' } });
   assert(!rStatusNeed.isError && JSON.parse(text(rStatusNeed)).items.length === 1, '按需求状态筛选');
   const rStatusOrder = await client.callTool({ name: 'purchase.list', arguments: { status: '已下单' } });
   assert(!rStatusOrder.isError && JSON.parse(text(rStatusOrder)).items.length === 1, '按子单状态筛选（兼容旧词表）');
+  // limit 语义：先倒序再截取，恒为最新 N 条（旧逻辑 slice(-N) 在 needs 新→旧下会截成最旧）
+  const rLimit = await client.callTool({ name: 'purchase.list', arguments: { limit: 2 } });
+  const limitList = JSON.parse(text(rLimit));
+  assert(limitList.items.length === 2
+    && limitList.items[0].id === 'rec_mock_1'
+    && limitList.items[1].name === '近期对比中',
+    'purchase limit=2 返回最新 2 条（不被服务端新→旧截反）');
 
   let state = await (await fetch(base + '/__state')).json();
   const beforeInvalidate = state.refreshCount;
@@ -103,6 +112,21 @@ function runCli(args, env) {
 
   const rt = await client.callTool({ name: 'todo.list', arguments: {} });
   assert(!rt.isError, '待办读取正常');
+
+  // 记账：服务端旧→新，MCP 统一倒序；limit 同样取最新
+  const rExp = await client.callTool({ name: 'expense.list', arguments: {} });
+  const expAll = JSON.parse(text(rExp));
+  assert(expAll.items.length === 3
+    && expAll.items[0].date === '2026-11-01'
+    && expAll.items[1].date === '2026-10-15'
+    && expAll.items[2].date === '2026-10-05',
+    'expense.list 统一按日期倒序（最新在前）');
+  const rExp2 = await client.callTool({ name: 'expense.list', arguments: { limit: 2 } });
+  const exp2 = JSON.parse(text(rExp2));
+  assert(exp2.items.length === 2
+    && exp2.items[0].date === '2026-11-01'
+    && exp2.items[1].date === '2026-10-15',
+    'expense limit=2 返回最新 2 条');
 
   const ra = await client.callTool({ name: 'analytics.summary', arguments: { month: '2026-10' } });
   assert(!ra.isError && JSON.parse(text(ra)).month === '2026-10', '月度统计聚合正常');
@@ -188,7 +212,7 @@ function runCli(args, env) {
     '--local',
   ], env3);
   assert(/INSTALL_OK username=admin/.test(installOut), 'install 用链接完成注册、授权与只读验证');
-  assert(/只读验证通过（采购记录 1 条，source=needs）/.test(installOut), 'install 结束后执行只读验证（needs）');
+  assert(/只读验证通过（采购记录 3 条，source=needs）/.test(installOut), 'install 结束后执行只读验证（needs）');
   assert(fs.existsSync(skillDir + '/SKILL.md') && fs.existsSync(cfgFile), 'install 同时安装 skill 并写入 MCP 配置');
 
   const auth3 = path.join(HOME3, 'auth.json');
@@ -203,7 +227,7 @@ function runCli(args, env) {
   const client3 = new Client({ name: 'e2e-client-3', version: '1.0.0' });
   await client3.connect(transport3);
   const r3 = await client3.callTool({ name: 'purchase.list', arguments: {} });
-  assert(!r3.isError && JSON.parse(text(r3)).items.length === 1, '新安装实例可立即只读访问');
+  assert(!r3.isError && JSON.parse(text(r3)).items.length === 3, '新安装实例可立即只读访问');
   await client3.close();
 
   // 主会话凭据未被安装流程影响

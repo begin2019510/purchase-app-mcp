@@ -201,6 +201,7 @@ npx -y github:begin2019510/purchase-app-mcp login             # 本机网页登�
   - **读**（list/get）优先 `GET /api/needs`（需求/供应商/子单两级模型），返回 `needStatus`、`legacyStatus`、`orderStatus`、完整 `orders`/`suppliers`；旧部署自动回退 `/api/items`。
   - **写**（create/update/delete）仍走 `/api/items` 兼容口，服务端状态机/Todo/分期联动照旧。
   - `status` 筛选同时接受：需求状态（对比中/已定点/已完成/已取消）、子单状态（待下单/已下单/…）、旧 8 态。
+  - 列表统一**按日期倒序（最新在前）**，`limit=N` 恒为最新 N 条（v1.3.1：不依赖服务端返回方向，修复 needs 新→旧时截成最旧的问题）；`expense.list`/`todo.list` 的 `limit` 同语义。
 - 记账：`expense.list` `expense.create` `expense.update` `expense.delete`
 - 待办：`todo.list` `todo.create` `todo.update` `todo.delete`
 - 项目：`project.list` `project.get` `project.create` `project.update` `project.delete` `phase.list` `phase.status.set`

@@ -32,7 +32,8 @@ const items = [{
   '阶段': 0,
 }];
 
-// 两级模型（与 App /api/needs rowToNeed 同形）：读路径优先走这里
+// 两级模型（与 App /api/needs rowToNeed 同形）：读路径优先走这里。
+// 排列方向与服务端一致：ORDER BY id DESC（新→旧），用于验证 limit 不被截反。
 const needs = [{
   id: 'rec_mock_1',
   '名称': '测试商品',
@@ -86,7 +87,88 @@ const needs = [{
     '到货时间': '',
     '归档时间': '',
   }],
+}, {
+  // 无子单的近对比中需求：date=null，靠「创建时间」参与倒序（最新在前）
+  id: 'rec_mock_2',
+  '名称': '近期对比中',
+  '分类': '日用品',
+  '预算下限': null,
+  '预算上限': null,
+  '状态': '对比中',
+  '维度': [],
+  '项目ID': '',
+  '阶段': null,
+  '虚拟': '',
+  '极速': '',
+  '历史': '',
+  '取消原因': '',
+  '定点时间': '',
+  '创建时间': '2026-11-15 12:00',
+  suppliers: [],
+  orders: [],
+}, {
+  // 更早的对比中需求：应被排到最后
+  id: 'rec_mock_0',
+  '名称': '九月旧需求',
+  '分类': '其他',
+  '预算下限': null,
+  '预算上限': null,
+  '状态': '对比中',
+  '维度': [],
+  '项目ID': '',
+  '阶段': null,
+  '虚拟': '',
+  '极速': '',
+  '历史': '',
+  '取消原因': '',
+  '定点时间': '',
+  '创建时间': '2026-09-01 09:00',
+  suppliers: [],
+  orders: [],
 }];
+
+// 记账夹具：服务端 /api/expenses 为 ORDER BY id（旧→新），验证倒序后 limit 取最新
+const expenses = [
+  {
+    id: 'rec_e1',
+    '日期': '2026-10-05',
+    '类型': '支出',
+    '分类': '餐饮',
+    '金额': 10,
+    '备注': '旧',
+    '分摊周数': 0,
+    '分摊开始周': '',
+    '图片': '',
+    '项目ID': '',
+    '阶段': null,
+  },
+  {
+    id: 'rec_e2',
+    '日期': '2026-10-15',
+    '类型': '支出',
+    '分类': '交通',
+    '金额': 20,
+    '备注': '中',
+    '分摊周数': 0,
+    '分摊开始周': '',
+    '图片': '',
+    '项目ID': '',
+    '阶段': null,
+  },
+  {
+    id: 'rec_e3',
+    '日期': '2026-11-01',
+    '类型': '支出',
+    '分类': '购物',
+    '金额': 30,
+    '备注': '新',
+    '分摊周数': 0,
+    '分摊开始周': '',
+    '图片': '',
+    '项目ID': '',
+    '阶段': null,
+  },
+];
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
@@ -187,7 +269,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'DELETE') return json(res, 200, { ok: true });
   }
   if (url.pathname === '/api/expenses') {
-    if (req.method === 'GET') return json(res, 200, []);
+    if (req.method === 'GET') return json(res, 200, expenses);
     return json(res, 200, { id: 'rec_e1' });
   }
   if (url.pathname === '/api/todos') {

@@ -22,7 +22,7 @@ module.exports = function registerPurchase(server, ctx) {
 
   register(server, ctx, 'purchase.list', {
     title: '采购列表',
-    description: '列出采购需求（两级模型：需求+供应商+子单）。status 可用需求状态/子单状态/旧 8 态；日期为毫秒时间戳；limit 取最近 N 条。返回 needStatus、orders、suppliers 等最新字段。',
+    description: '列出采购需求（两级模型：需求+供应商+子单）。列表统一按日期倒序（最新在前），limit=N 恒为最新 N 条。status 可用需求状态/子单状态/旧 8 态；日期为毫秒时间戳。返回 needStatus、orders、suppliers 等最新字段。',
     inputSchema: {
       status: z.string().optional().describe(STATUS_DESC),
       category: z.string().optional(),
@@ -30,7 +30,7 @@ module.exports = function registerPurchase(server, ctx) {
       keyword: z.string().optional(),
       from: z.number().optional().describe('起始日期（毫秒时间戳）'),
       to: z.number().optional().describe('结束日期（毫秒时间戳）'),
-      limit: z.number().int().positive().optional(),
+      limit: z.number().int().positive().optional().describe('最新 N 条（先倒序再截取）'),
     },
     annotations: { readOnlyHint: true },
   }, async (a) => {

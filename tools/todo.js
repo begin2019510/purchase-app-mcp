@@ -2,7 +2,7 @@
 // 待办域：todo.list/create/update/delete（重复待办完成自动续期、软删/硬删按服务端规则）
 const { z } = require('zod');
 const { register } = require('./util');
-const { requireField } = require('../lib/datamap');
+const { requireField, sortNewestFirst } = require('../lib/datamap');
 
 function filter(rows, { status, category, priority, projectId, keyword, limit } = {}) {
   let out = rows;
@@ -14,7 +14,8 @@ function filter(rows, { status, category, priority, projectId, keyword, limit } 
     const k = String(keyword).toLowerCase();
     out = out.filter(r => JSON.stringify(r).toLowerCase().includes(k));
   }
-  if (limit && Number(limit) > 0) out = out.slice(-Number(limit));
+  // 先按新旧（id 序号）排序再截取：limit=N 恒为最新 N 条，不依赖服务端 ORDER BY 方向
+  if (limit && Number(limit) > 0) out = sortNewestFirst(out).slice(0, Number(limit));
   return out;
 }
 
@@ -30,7 +31,7 @@ module.exports = function registerTodo(server, ctx) {
       priority: z.string().optional().describe('高/中/低'),
       projectId: z.string().optional(),
       keyword: z.string().optional(),
-      limit: z.number().int().positive().optional(),
+      limit: z.number().int().positive().optional().describe('最新 N 条（先倒序再截取）'),
     },
     annotations: { readOnlyHint: true },
   }, async (a) => {

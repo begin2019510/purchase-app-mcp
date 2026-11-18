@@ -11,7 +11,7 @@ module.exports = function registerExpense(server, ctx) {
 
   register(server, ctx, 'expense.list', {
     title: '记账列表',
-    description: '列出记账（收支）记录，可按类型/分类/项目/关键词/日期区间筛选。',
+    description: '列出记账（收支）记录，可按类型/分类/项目/关键词/日期区间筛选。列表统一按日期倒序（最新在前），limit=N 恒为最新 N 条。',
     inputSchema: {
       type: z.enum(TYPES).optional(),
       category: z.string().optional(),
@@ -19,7 +19,7 @@ module.exports = function registerExpense(server, ctx) {
       keyword: z.string().optional(),
       from: z.number().optional().describe('起始日期（毫秒时间戳）'),
       to: z.number().optional().describe('结束日期（毫秒时间戳）'),
-      limit: z.number().int().positive().optional(),
+      limit: z.number().int().positive().optional().describe('最新 N 条（先倒序再截取）'),
     },
     annotations: { readOnlyHint: true },
   }, async (a) => {
