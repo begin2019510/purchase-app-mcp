@@ -3,6 +3,7 @@
 const { z } = require('zod');
 const { register } = require('./util');
 const { requireField, sortNewestFirst } = require('../lib/datamap');
+const { assertConfirm } = require('../lib/confirm');
 
 function filter(rows, { status, category, priority, projectId, keyword, limit } = {}) {
   let out = rows;
@@ -92,11 +93,23 @@ module.exports = function registerTodo(server, ctx) {
 
   register(server, ctx, 'todo.delete', {
     title: '删除待办',
-    description: '默认软删（状态置已删除）；purge=true 彻底删除。',
-    inputSchema: { id: z.string(), purge: z.boolean().optional() },
+    description: '默认软删（状态置已删除，T0）；purge=true 彻底删除为 T1：confirm=待办标题。',
+    inputSchema: {
+      id: z.string(),
+      purge: z.boolean().optional(),
+      confirm: z.string().optional().describe('purge=true 时必填：待办标题'),
+    },
     annotations: { destructiveHint: true },
   }, async (a) => {
     requireField(a, 'id');
+    if (a.purge) {
+      const rows = await api.get('/api/todos');
+      const t = (Array.isArray(rows) ? rows : []).find(r => r && r.id === a.id);
+      if (!t) throw new Error('待办不存在：' + a.id);
+      const label = String(t.title || '').trim() || a.id;
+      assertConfirm(a.confirm, label,
+        '彻底删除待办「' + label + '」（' + a.id + '，不可恢复）');
+    }
     await api.del('/api/todos?id=' + encodeURIComponent(a.id) + (a.purge ? '&action=purge' : ''));
     return { ok: true, purged: !!a.purge };
   });

@@ -3,6 +3,7 @@
 const { z } = require('zod');
 const { register } = require('./util');
 const { mapExpense, applyFilters, requireField } = require('../lib/datamap');
+const { assertConfirm } = require('../lib/confirm');
 
 const TYPES = ['支出', '收入', '采购'];
 
@@ -71,11 +72,21 @@ module.exports = function registerExpense(server, ctx) {
 
   register(server, ctx, 'expense.delete', {
     title: '删除记账',
-    description: '删除记账记录。',
-    inputSchema: { id: z.string() },
+    description: '删除记账记录。T1 高危：confirm=备注（无备注时为 ID）。',
+    inputSchema: {
+      id: z.string(),
+      confirm: z.string().optional().describe('必须等于该记账的备注；无备注时填 ID'),
+    },
     annotations: { destructiveHint: true },
   }, async (a) => {
     requireField(a, 'id');
+    const rows = await api.get('/api/expenses');
+    const row = (Array.isArray(rows) ? rows : []).find(r => r && r.id === a.id);
+    if (!row) throw new Error('记账记录不存在：' + a.id);
+    const label = String(row['备注'] || '').trim() || a.id;
+    assertConfirm(a.confirm, label,
+      '删除记账 ' + a.id + '（' + (row['类型'] || '') + ' ' + (row['金额'] != null ? row['金额'] : '') +
+      '，备注「' + label + '」，不可恢复）');
     await api.del('/api/expenses?id=' + encodeURIComponent(a.id));
     return { ok: true };
   });

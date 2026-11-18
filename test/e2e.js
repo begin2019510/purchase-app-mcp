@@ -59,7 +59,14 @@ function runCli(args, env) {
 
   const tools = await client.listTools();
   const names = tools.tools.map(t => t.name);
-  assert(names.includes('purchase.list') && names.includes('phase.status.set') && names.includes('analytics.summary'), 'tools/list 注册完整（' + names.length + ' 个工具）');
+  assert(names.length === 35, 'tools/list 共 35 个工具（v1.4.0 含写工具），实际 ' + names.length);
+  assert(
+    ['purchase.list', 'phase.status.set', 'analytics.summary',
+      'supplier.add', 'supplier.update', 'supplier.delete',
+      'purchase.decide', 'purchase.undecided', 'purchase.cancel',
+      'order.transition', 'order.update'].every(n => names.includes(n)),
+    'tools/list 注册完整（含 v1.4.0 写/授权工具）'
+  );
   assert(!names.some(n => /user|deploy|shell|log/i.test(n)), '不含用户管理/部署/shell 类工具');
 
   const r0 = await client.callTool({ name: 'purchase.list', arguments: {} });
@@ -264,6 +271,162 @@ function runCli(args, env) {
   }
   assert(badErr && /无法从链接中识别安装票据/.test(badErr.stderr || ''), '无效链接被拒绝且不发起兑换');
 
+  // ---- v1.4.0 写路径 + T1 二次授权（在只读/安装断言之后，避免改动夹具计数）----
+  // 主 client 已在登录段关闭，这里用 env1 重新连一个
+  const clientW = new Client({ name: 'e2e-client-write', version: '1.0.0' });
+  await clientW.connect(new StdioClientTransport({
+    command: process.execPath,
+    args: [BIN],
+    env: { ...process.env, ...env1 },
+  }));
+
+  const rCmp = await clientW.callTool({
+    name: 'purchase.create',
+    arguments: { name: '对比新需求', category: '数码', compareOnly: true, budgetMin: 10, budgetMax: 20 },
+  });
+  assert(!rCmp.isError && JSON.parse(text(rCmp)).id, 'compareOnly 走 /api/needs 创建需求');
+  const listW = JSON.parse(text(await clientW.callTool({ name: 'purchase.list', arguments: {} })));
+  const newNeed = listW.items.find(i => i.name === '对比新需求');
+  assert(newNeed && newNeed.needStatus === '对比中', '新建需求状态为对比中且出现在列表');
+
+  const rSupAdd = await clientW.callTool({
+    name: 'supplier.add',
+    arguments: {
+      needId: newNeed.id, name: '供应商A', price: 50, platform: '淘宝',
+      pros: '便宜', cons: '发货慢',
+    },
+  });
+  assert(!rSupAdd.isError && JSON.parse(text(rSupAdd)).id, 'supplier.add 添加供应商');
+  const supId = JSON.parse(text(rSupAdd)).id;
+
+  const rSupUp = await clientW.callTool({
+    name: 'supplier.update',
+    arguments: { id: supId, pros: '价格低、包邮', cons: '售后一般', note: '备选主力' },
+  });
+  assert(!rSupUp.isError, 'supplier.update 更新优缺点（T0 代写）');
+  const gotNeed = JSON.parse(text(await clientW.callTool({ name: 'purchase.get', arguments: { id: newNeed.id } })));
+  const gotSup = (gotNeed.suppliers || []).find(s => s.id === supId);
+  assert(gotSup && gotSup.pros === '价格低、包邮' && gotSup.cons === '售后一般', '优缺点已写入供应商');
+
+  const rDec = await clientW.callTool({
+    name: 'purchase.decide',
+    arguments: { needId: newNeed.id, supplierId: supId },
+  });
+  assert(!rDec.isError, 'purchase.decide 定点（T0）');
+  const afterDec = JSON.parse(text(await clientW.callTool({ name: 'purchase.get', arguments: { id: newNeed.id } })));
+  assert(afterDec.needStatus === '已定点', '定点后需求状态为已定点');
+
+  const rTrFwd = await clientW.callTool({ name: 'order.transition', arguments: { id: 'rec_o1', to: '已到' } });
+  assert(!rTrFwd.isError, 'order.transition 正向已下单→已到（T0）');
+
+  const rTrTermBad = await clientW.callTool({ name: 'order.transition', arguments: { id: 'rec_o1', to: '已退' } });
+  assert(rTrTermBad.isError && /二次授权|confirm/.test(text(rTrTermBad)), '终态流转缺 confirm 被拒绝');
+  const rTrTermOk = await clientW.callTool({
+    name: 'order.transition',
+    arguments: { id: 'rec_o1', to: '已退', confirm: '测试商品' },
+  });
+  assert(!rTrTermOk.isError, '终态流转 confirm=父需求名后执行');
+
+  const rOrUp = await clientW.callTool({
+    name: 'order.update',
+    arguments: { id: 'rec_o1', note: '已退货入库' },
+  });
+  assert(!rOrUp.isError, 'order.update 更新备注（T0）');
+
+  // purchase.delete：缺 confirm / 错 confirm / 正确 confirm
+  const rDelBad = await clientW.callTool({ name: 'purchase.delete', arguments: { id: newNeed.id } });
+  assert(rDelBad.isError && /二次授权/.test(text(rDelBad)), 'purchase.delete 缺 confirm 被拒绝');
+  const rDelMis = await clientW.callTool({
+    name: 'purchase.delete',
+    arguments: { id: newNeed.id, confirm: '错名字' },
+  });
+  assert(rDelMis.isError && /confirm 不匹配/.test(text(rDelMis)), 'purchase.delete confirm 不匹配被拒绝');
+  const rDelOk = await clientW.callTool({
+    name: 'purchase.delete',
+    arguments: { id: newNeed.id, confirm: '对比新需求' },
+  });
+  assert(!rDelOk.isError, 'purchase.delete confirm 匹配后删除');
+
+  // supplier.delete T1
+  const rSupAdd2 = await clientW.callTool({
+    name: 'supplier.add',
+    arguments: { needId: 'rec_mock_0', name: '临时供应商', pros: 'x' },
+  });
+  const sup2 = JSON.parse(text(rSupAdd2)).id;
+  const rSupDelMis = await clientW.callTool({ name: 'supplier.delete', arguments: { id: sup2, confirm: 'nope' } });
+  assert(rSupDelMis.isError && /confirm 不匹配/.test(text(rSupDelMis)), 'supplier.delete confirm 不匹配被拒绝');
+  const rSupDelOk = await clientW.callTool({ name: 'supplier.delete', arguments: { id: sup2, confirm: '临时供应商' } });
+  assert(!rSupDelOk.isError, 'supplier.delete confirm 匹配后删除');
+
+  // purchase.cancel T1（rec_mock_0 无入账子单，可取消）
+  const rCanMis = await clientW.callTool({ name: 'purchase.cancel', arguments: { id: 'rec_mock_0', confirm: 'x' } });
+  assert(rCanMis.isError && /confirm 不匹配/.test(text(rCanMis)), 'purchase.cancel confirm 不匹配被拒绝');
+  const rCanOk = await clientW.callTool({
+    name: 'purchase.cancel',
+    arguments: { id: 'rec_mock_0', reason: '不买了', confirm: '九月旧需求' },
+  });
+  assert(!rCanOk.isError, 'purchase.cancel confirm 匹配后取消');
+
+  // purchase.undecided：先给 rec_mock_2 定点再回退
+  const rSup3 = await clientW.callTool({
+    name: 'supplier.add',
+    arguments: { needId: 'rec_mock_2', name: '定点候选', price: 30 },
+  });
+  const sup3 = JSON.parse(text(rSup3)).id;
+  await clientW.callTool({ name: 'purchase.decide', arguments: { needId: 'rec_mock_2', supplierId: sup3 } });
+  const rUndMis = await clientW.callTool({ name: 'purchase.undecided', arguments: { id: 'rec_mock_2', confirm: 'x' } });
+  assert(rUndMis.isError && /confirm 不匹配/.test(text(rUndMis)), 'purchase.undecided confirm 不匹配被拒绝');
+  const rUndOk = await clientW.callTool({
+    name: 'purchase.undecided',
+    arguments: { id: 'rec_mock_2', confirm: '近期对比中' },
+  });
+  assert(!rUndOk.isError, 'purchase.undecided confirm 匹配后回退');
+
+  // expense.delete T1：备注「新」
+  const rExpDelMis = await clientW.callTool({ name: 'expense.delete', arguments: { id: 'rec_e3', confirm: 'x' } });
+  assert(rExpDelMis.isError && /confirm 不匹配/.test(text(rExpDelMis)), 'expense.delete confirm 不匹配被拒绝');
+  const rExpDelOk = await clientW.callTool({ name: 'expense.delete', arguments: { id: 'rec_e3', confirm: '新' } });
+  assert(!rExpDelOk.isError, 'expense.delete confirm=备注后删除');
+
+  // project.delete T1：项目名「测试项目」
+  const rProjMis = await clientW.callTool({ name: 'project.delete', arguments: { id: 'p1', confirm: 'x' } });
+  assert(rProjMis.isError && /confirm 不匹配/.test(text(rProjMis)), 'project.delete confirm 不匹配被拒绝');
+  const rProjOk = await clientW.callTool({ name: 'project.delete', arguments: { id: 'p1', confirm: '测试项目' } });
+  assert(!rProjOk.isError, 'project.delete confirm 匹配后删除');
+
+  // todo.delete purge T1；软删仍 T0
+  const rTodoSoft = await clientW.callTool({ name: 'todo.delete', arguments: { id: 'rec_t1' } });
+  assert(!rTodoSoft.isError, 'todo 软删无需 confirm（T0）');
+  await clientW.callTool({ name: 'todo.create', arguments: { title: '硬删目标' } });
+  // mock POST 会 push；再取最新 id
+  const todosNow = JSON.parse(text(await clientW.callTool({ name: 'todo.list', arguments: {} })));
+  const hardTodo = todosNow.items.find(t => t.title === '硬删目标');
+  assert(hardTodo, 'todo.create 创建硬删目标');
+  const rPurgeMis = await clientW.callTool({ name: 'todo.delete', arguments: { id: hardTodo.id, purge: true, confirm: 'x' } });
+  assert(rPurgeMis.isError && /confirm 不匹配/.test(text(rPurgeMis)), 'todo purge confirm 不匹配被拒绝');
+  const rPurgeOk = await clientW.callTool({
+    name: 'todo.delete',
+    arguments: { id: hardTodo.id, purge: true, confirm: '硬删目标' },
+  });
+  assert(!rPurgeOk.isError, 'todo purge confirm 匹配后彻底删除');
+
+  // cats/recurring update：固定字面量
+  const rCatsMis = await clientW.callTool({ name: 'cats.update', arguments: { patch: { list: ['A'] } } });
+  assert(rCatsMis.isError && /覆盖确认/.test(text(rCatsMis)), 'cats.update 缺 confirm 提示固定字面量');
+  const rCatsOk = await clientW.callTool({
+    name: 'cats.update',
+    arguments: { patch: { list: ['A'] }, confirm: '覆盖确认' },
+  });
+  assert(!rCatsOk.isError, 'cats.update confirm=覆盖确认后执行');
+  const rRecMis = await clientW.callTool({ name: 'recurring.update', arguments: { patch: { items: [] }, confirm: '别的' } });
+  assert(rRecMis.isError && /confirm 不匹配/.test(text(rRecMis)), 'recurring.update confirm 不匹配被拒绝');
+  const rRecOk = await clientW.callTool({
+    name: 'recurring.update',
+    arguments: { patch: { items: [] }, confirm: '覆盖确认' },
+  });
+  assert(!rRecOk.isError, 'recurring.update confirm 匹配后执行');
+
+  await clientW.close();
   mock.kill('SIGTERM');
   fs.rmSync(HOME1, { recursive: true, force: true });
   fs.rmSync(HOME2, { recursive: true, force: true });

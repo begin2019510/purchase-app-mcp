@@ -195,11 +195,14 @@ npx -y github:begin2019510/purchase-app-mcp login             # 本机网页登�
 | `PURCHASE_APP_USERNAME` | 登录用户名，默认 `admin` |
 | `PURCHASE_APP_PASSWORD` | 仅用于无浏览器环境的一次性登录；不保存 |
 
-## 工具（27 个）
+## 工具（35 个）
 
 - 采购：`purchase.list` `purchase.get` `purchase.create` `purchase.update` `purchase.delete`
+  `purchase.decide` `purchase.undecided` `purchase.cancel`
+- 供应商：`supplier.add` `supplier.update` `supplier.delete`
+- 子单：`order.transition` `order.update`
   - **读**（list/get）优先 `GET /api/needs`（需求/供应商/子单两级模型），返回 `needStatus`、`legacyStatus`、`orderStatus`、完整 `orders`/`suppliers`；旧部署自动回退 `/api/items`。
-  - **写**（create/update/delete）仍走 `/api/items` 兼容口，服务端状态机/Todo/分期联动照旧。
+  - **写**：`compareOnly=true` 走原生 `POST /api/needs`；定点/供应商/子单走 `/api/needs|suppliers|orders`；`create/update/delete`（非 compareOnly）仍走 `/api/items` 兼容口，服务端状态机/Todo/分期联动照旧。
   - `status` 筛选同时接受：需求状态（对比中/已定点/已完成/已取消）、子单状态（待下单/已下单/…）、旧 8 态。
   - 列表统一**按日期倒序（最新在前）**，`limit=N` 恒为最新 N 条（v1.3.1：不依赖服务端返回方向，修复 needs 新→旧时截成最旧的问题）；`expense.list`/`todo.list` 的 `limit` 同语义。
 - 记账：`expense.list` `expense.create` `expense.update` `expense.delete`
@@ -210,6 +213,27 @@ npx -y github:begin2019510/purchase-app-mcp login             # 本机网页登�
 - 统计：`analytics.summary`（月度收入、采购、净支出、分期、预算使用率、分类 TOP、环比）；采购侧优先从 needs 全量子单聚合（与 App `orderRows` 同口径）
 
 写操作全部走 App 真实业务 API，服务端的状态联动（审批、待办生成、分期、预算规则等）照常生效。
+
+### 写操作分层（v1.4.0：T0 直接写 / T1 二次授权）
+
+| 层 | 含义 | 工具 |
+|----|------|------|
+| **T0** | 用户一句话意图即可执行（创建、推进、代写优缺点等） | `purchase.create`（含 `compareOnly`）、`purchase.decide`、`supplier.add`、`supplier.update`、`order.transition` 正向（待下单→已下单→已到→已归档）、`order.update`、`expense.*` 增改、`todo.*` 增改与软删、`project.*` 增改、`budget.save`、`phase.status.set`、普通字段的 `purchase.update` |
+| **T1** | 高危：必须先给用户一行预览（对象+后果+不可逆点），得到明确同意后带 `confirm` 调用 | `purchase.delete` / `purchase.cancel` / `purchase.undecided` / `purchase.update`（status 为已退/已取消/已归档）、`supplier.delete`、`order.transition` 进入已退/已取消/已归档、`project.delete`、`expense.delete`、`todo.delete(purge=true)`、`cats.update`、`recurring.update` |
+
+**`confirm` 规则**（MCP 在执行前先读目标真实名称再比对，不匹配直接报错、不执行）：
+
+| 操作 | confirm 必须等于 |
+|------|------------------|
+| `purchase.delete` / `cancel` / `undecided` / 终态 `purchase.update` | 需求名称 |
+| `supplier.delete` | 供应商名称 |
+| `order.transition` → 已退/已取消/已归档 | **父需求名称** |
+| `project.delete` | 项目名称 |
+| `expense.delete` | 备注（无备注则 ID） |
+| `todo.delete(purge=true)` | 待办标题 |
+| `cats.update` / `recurring.update` | 固定字面量 `覆盖确认` |
+
+诚实边界：MCP 无法真正验证「用户已点头」——与 GitHub 删除仓库同构：参数在工具调用中可见 + 本机 `audit.log` 留痕，作为标准折中。skill 铁律：T1 调用前必须先展示一行预览并得到用户明确回复。
 
 ### 阶段工具与版本要求
 

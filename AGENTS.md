@@ -60,15 +60,19 @@ npx -y github:begin2019510/purchase-app-mcp logout
 1. 绝不询问、记录、回显用户的 App 密码；密码只能由用户在自己的终端/浏览器里输入。
 2. 不要打印、转存、提交 refresh token / access token / 安装链接。凭据只由程序写入本机文件。
 3. 安装后先调用只读工具验证：`purchase.list`、`expense.list`、`todo.list`、`project.list`、`budget.get`、`analytics.summary`。
-4. 写操作（create/update/delete、`budget.save`、阶段状态等）必须先征得用户明确同意；删除与批量修改必须再次确认。
+4. 写操作分两层（v1.4.0）：
+   - **T0**（一句话意图即可）：创建、定点、推进状态、代写供应商优缺点、普通字段更新、软删待办等。
+   - **T1（二次授权）**：删除/取消/回退定点/终态写入/硬删待办/覆盖分类与重复项。**必须先向用户展示一行预览（对象+后果+不可逆点），得到明确回复后再带 `confirm` 调用**；`confirm` 精确等于目标展示名（见下表），不匹配 MCP 会拒绝执行。
 5. 修改 agent 配置前先备份；不要改与安装无关的配置。
 6. 不要自行重启 ttyd / tmux 等父进程；需要重启的情况把命令交给用户在独立会话执行。
 7. 票据、凭据都按「哪个 agent 用就由哪个 agent 自己持有」处理，禁止在 agent 之间共享同一个 token。
 
-## 工具（27 个）
+## 工具（35 个）
 
-- 采购：`purchase.list/get/create/update/delete`
-  - 读走 `/api/needs`（返回 needStatus + 全部 orders/suppliers）；旧 App 回退 `/api/items`。写仍走兼容口 `/api/items`。
+- 采购：`purchase.list/get/create/update/delete`、`purchase.decide/undecided/cancel`
+- 供应商：`supplier.add/update/delete`
+- 子单：`order.transition`、`order.update`
+  - 读走 `/api/needs`（返回 needStatus + 全部 orders/suppliers）；旧 App 回退 `/api/items`。写按 v1.4.0 分层（compareOnly→`/api/needs`，定点/供应商/子单走原生口，其余仍兼容口）。
   - 列表统一按日期倒序（最新在前），`limit=N` 恒为最新 N 条（`expense.list`/`todo.list` 同语义）。
 - 记账：`expense.list/create/update/delete`
 - 待办：`todo.list/create/update/delete`
@@ -76,6 +80,18 @@ npx -y github:begin2019510/purchase-app-mcp logout
 - 预算：`budget.get`、`budget.save`
 - 重复项/分类：`recurring.list/update`、`cats.list/update`
 - 统计：`analytics.summary`
+
+### T1 confirm 对照
+
+| 工具 | confirm = |
+|------|-----------|
+| `purchase.delete` / `cancel` / `undecided` / 终态 `purchase.update` | 需求名称 |
+| `supplier.delete` | 供应商名称 |
+| `order.transition` → 已退/已取消/已归档 | 父需求名称 |
+| `project.delete` | 项目名称 |
+| `expense.delete` | 备注（无备注则 ID） |
+| `todo.delete(purge=true)` | 待办标题 |
+| `cats.update` / `recurring.update` | `覆盖确认` |
 
 `phase.*` 需要 App **3.0.0+**（含此前的 4.0.52–4.0.61）。若返回「接口返回了网页而不是 JSON」，说明目标 App 版本过旧：不要声称成功，先让用户升级 App。
 

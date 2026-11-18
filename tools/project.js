@@ -3,6 +3,7 @@
 const { z } = require('zod');
 const { register } = require('./util');
 const { requireField } = require('../lib/datamap');
+const { assertConfirm } = require('../lib/confirm');
 
 function summarize(p) {
   const phases = p.phases || [];
@@ -95,11 +96,19 @@ module.exports = function registerProject(server, ctx) {
 
   register(server, ctx, 'project.delete', {
     title: '删除项目',
-    description: '删除项目并级联删除阶段/交付物；关联的采购/记账/待办解除关联（不删数据）。',
-    inputSchema: { id: z.string() },
+    description: '删除项目并级联删除阶段/交付物；关联的采购/记账/待办解除关联（不删数据）。T1 高危：confirm=项目名称。',
+    inputSchema: {
+      id: z.string(),
+      confirm: z.string().optional().describe('必须等于该项目名称'),
+    },
     annotations: { destructiveHint: true },
   }, async (a) => {
     requireField(a, 'id');
+    const rows = await allProjects();
+    const p = (Array.isArray(rows) ? rows : []).find(x => x && x.id === a.id);
+    if (!p) throw new Error('项目不存在：' + a.id);
+    assertConfirm(a.confirm, p.name,
+      '删除项目「' + p.name + '」（' + a.id + '，级联删阶段/交付物，关联数据解除关联，不可恢复）');
     await api.del('/api/projects?id=' + encodeURIComponent(a.id));
     return { ok: true };
   });

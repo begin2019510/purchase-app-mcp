@@ -127,6 +127,32 @@ const needs = [{
   orders: [],
 }];
 
+// 项目/待办夹具（v1.4.0 写路径与 T1 confirm 校验用）
+const projects = [{
+  id: 'p1',
+  name: '测试项目',
+  description: '',
+  dueDate: '',
+  status: '进行中',
+  color: '',
+  budget: null,
+  currentPhase: 0,
+  phases: [],
+  items: [],
+  spend: { buy: 0, exp: 0 },
+}];
+const todos = [{
+  id: 'rec_t1',
+  title: '测试待办',
+  description: '',
+  dueDate: '',
+  status: '待办',
+  priority: '中',
+  category: '',
+  repeat: '无',
+  projectId: '',
+}];
+
 // 记账夹具：服务端 /api/expenses 为 ORDER BY id（旧→新），验证倒序后 limit 取最新
 const expenses = [
   {
@@ -257,11 +283,247 @@ const server = http.createServer(async (req, res) => {
   // 业务接口：除 /api/phases 外都要求有效 access token
   if (!validAccess.has(token)) return json(res, 401, { error: '未授权：请登录' });
 
+  // ---- needs 两级模型（v1.4.0 写路径）----
+  const findNeed = (id) => needs.find(n => n.id === id) || null;
+  const findSupplier = (id) => {
+    for (const n of needs) {
+      const s = (n.suppliers || []).find(x => x.id === id);
+      if (s) return { need: n, supplier: s };
+    }
+    return null;
+  };
+  const findOrder = (id) => {
+    for (const n of needs) {
+      const o = (n.orders || []).find(x => x.id === id);
+      if (o) return { need: n, order: o };
+    }
+    return null;
+  };
+  const nowDt = '2026-11-18 12:00';
+  let m;
+
   if (url.pathname === '/api/needs') {
-    // 两级模型读路径（MCP 优先）
     if (req.method === 'GET') return json(res, 200, needs);
+    if (req.method === 'POST') {
+      const id = 'rec_n' + (++seq);
+      needs.unshift({
+        id,
+        '名称': String(body.name || '').trim(),
+        '分类': body.category || '其他',
+        '预算下限': body.budgetMin === undefined ? null : body.budgetMin,
+        '预算上限': body.budgetMax === undefined ? null : body.budgetMax,
+        '状态': '对比中',
+        '维度': [],
+        '项目ID': body.projectId || '',
+        '阶段': body.phaseIdx === undefined ? null : body.phaseIdx,
+        '虚拟': body.virtual ? '1' : '',
+        '极速': '',
+        '历史': '',
+        '取消原因': '',
+        '定点时间': '',
+        '创建时间': nowDt,
+        suppliers: [],
+        orders: [],
+      });
+      return json(res, 200, { id });
+    }
     return json(res, 405, { error: 'Method Not Allowed' });
   }
+  if ((m = url.pathname.match(/^\/api\/needs\/([^/]+)$/))) {
+    const need = findNeed(decodeURIComponent(m[1]));
+    if (req.method === 'PUT') {
+      if (!need) return json(res, 404, { error: 'not found' });
+      if (body.name !== undefined) need['名称'] = String(body.name);
+      if (body.category !== undefined) need['分类'] = body.category;
+      if (body.budgetMin !== undefined) need['预算下限'] = body.budgetMin;
+      if (body.budgetMax !== undefined) need['预算上限'] = body.budgetMax;
+      if (body.projectId !== undefined) need['项目ID'] = body.projectId;
+      if (body.phaseIdx !== undefined) need['阶段'] = body.phaseIdx;
+      if (body.cancelReason !== undefined) need['取消原因'] = String(body.cancelReason || '');
+      return json(res, 200, { ok: true });
+    }
+    if (req.method === 'DELETE') {
+      if (need) {
+        const i = needs.indexOf(need);
+        if (i >= 0) needs.splice(i, 1);
+      }
+      return json(res, 200, { ok: true });
+    }
+    return json(res, 405, { error: 'Method Not Allowed' });
+  }
+  if ((m = url.pathname.match(/^\/api\/needs\/([^/]+)\/suppliers$/)) && req.method === 'POST') {
+    const need = findNeed(decodeURIComponent(m[1]));
+    if (!need) return json(res, 404, { error: '需求不存在' });
+    if (need['状态'] !== '对比中' && need['状态'] !== '已定点') {
+      return json(res, 400, { error: '当前状态不可添加供应商' });
+    }
+    const id = 'rec_s' + (++seq);
+    need.suppliers.push({
+      id,
+      needId: need.id,
+      '谁': String(body.name || '').trim(),
+      '平台': body.platform || '',
+      '报价': body.price === undefined ? null : body.price,
+      '图片': '',
+      '优点': body.pros || '',
+      '缺点': body.cons || '',
+      '备注': body.note || '',
+      '打分': body.scores && typeof body.scores === 'object' ? body.scores : {},
+      '排序': need.suppliers.length,
+    });
+    return json(res, 200, { id });
+  }
+  if ((m = url.pathname.match(/^\/api\/needs\/([^/]+)\/decide$/)) && req.method === 'POST') {
+    const need = findNeed(decodeURIComponent(m[1]));
+    if (!need) return json(res, 404, { error: '需求不存在' });
+    if (need['状态'] === '已完成' || need['状态'] === '已取消') {
+      return json(res, 400, { error: '需求已结束' });
+    }
+    const supHit = findSupplier(String(body.supplierId || ''));
+    if (!supHit || supHit.need !== need) return json(res, 404, { error: '供应商不存在' });
+    need['状态'] = '已定点';
+    need['定点时间'] = nowDt;
+    need['定点供应商ID'] = supHit.supplier.id;
+    need['定点供应商IDs'] = need.orders
+      .filter(o => o.role === 'formal')
+      .map(o => o.supplierId)
+      .concat([supHit.supplier.id])
+      .filter((v, i, a) => a.indexOf(v) === i);
+    let formal = need.orders.find(o => o.role === 'formal' && o.supplierId === supHit.supplier.id);
+    if (!formal) {
+      formal = {
+        id: 'rec_o' + (++seq),
+        needId: need.id,
+        supplierId: supHit.supplier.id,
+        role: 'formal',
+        '数量': body.qty !== undefined ? Number(body.qty) : 1,
+        '实付': body.pricePaid !== undefined ? Number(body.pricePaid)
+          : (supHit.supplier['报价'] != null ? Number(supHit.supplier['报价']) : 0),
+        '状态': '待下单',
+        '分期期数': 0,
+        '分期金额': 0,
+        '分期开始月': '',
+        '分期已还': 0,
+        '日期': null,
+        '图片': '',
+        '备注': body.note || '',
+        '极速': '',
+        '创建时间': nowDt,
+        '审批时间': '',
+        '下单时间': '',
+        '到货时间': '',
+        '归档时间': '',
+      };
+      need.orders.push(formal);
+    } else {
+      if (body.pricePaid !== undefined) formal['实付'] = Number(body.pricePaid);
+      if (body.qty !== undefined) formal['数量'] = Number(body.qty);
+      if (body.note !== undefined) formal['备注'] = String(body.note || '');
+    }
+    return json(res, 200, { ok: true, orderId: formal.id });
+  }
+  if ((m = url.pathname.match(/^\/api\/needs\/([^/]+)\/undecided$/)) && req.method === 'POST') {
+    const need = findNeed(decodeURIComponent(m[1]));
+    if (!need) return json(res, 404, { error: 'not found' });
+    if (need['状态'] !== '已定点') return json(res, 400, { error: '需求未定点' });
+    const formals = need.orders.filter(o => o.role === 'formal');
+    let target = null;
+    if (body.supplierId) {
+      target = formals.find(o => o.supplierId === String(body.supplierId)) || null;
+      if (!target) return json(res, 400, { error: '该供应商没有正式单' });
+    } else {
+      if (formals.length > 1) return json(res, 400, { error: '该需求有多家定点，请指定要回退的供应商' });
+      target = formals[0] || null;
+    }
+    if (target && target['状态'] !== '待下单') {
+      return json(res, 400, { error: '该供应商正式单已下单，不可回退定点' });
+    }
+    if (target) need.orders = need.orders.filter(o => o !== target);
+    const rest = need.orders.filter(o => o.role === 'formal');
+    if (rest.length) {
+      need['状态'] = '已定点';
+      need['定点供应商ID'] = rest[0].supplierId;
+      need['定点供应商IDs'] = rest.map(o => o.supplierId);
+    } else {
+      need['状态'] = '对比中';
+      need['定点供应商ID'] = '';
+      need['定点供应商IDs'] = [];
+      need['定点时间'] = '';
+    }
+    return json(res, 200, { ok: true, remaining: rest.length });
+  }
+  if ((m = url.pathname.match(/^\/api\/needs\/([^/]+)\/cancel$/)) && req.method === 'POST') {
+    const need = findNeed(decodeURIComponent(m[1]));
+    if (!need) return json(res, 404, { error: 'not found' });
+    if (need['状态'] === '已完成') return json(res, 400, { error: '需求已完成，不可取消' });
+    if (need['状态'] === '已取消') return json(res, 200, { ok: true });
+    const spent = (need.orders || []).some(o =>
+      ['已下单', '已到', '已归档'].includes(o['状态']));
+    if (spent) return json(res, 400, { error: '已有入账子单，不可取消需求（请先退货或归档）' });
+    for (const o of need.orders) {
+      if (!['已归档', '已取消'].includes(o['状态'])) o['状态'] = '已取消';
+    }
+    need['状态'] = '已取消';
+    need['取消原因'] = String(body.reason || body.cancelReason || '').slice(0, 200);
+    return json(res, 200, { ok: true });
+  }
+  if ((m = url.pathname.match(/^\/api\/suppliers\/([^/]+)$/))) {
+    const hit = findSupplier(decodeURIComponent(m[1]));
+    if (req.method === 'PUT') {
+      if (!hit) return json(res, 404, { error: 'not found' });
+      const s = hit.supplier;
+      if (body.name !== undefined) s['谁'] = String(body.name);
+      if (body.price !== undefined) s['报价'] = body.price;
+      if (body.platform !== undefined) s['平台'] = String(body.platform || '');
+      if (body.pros !== undefined) s['优点'] = String(body.pros || '');
+      if (body.cons !== undefined) s['缺点'] = String(body.cons || '');
+      if (body.note !== undefined) s['备注'] = String(body.note || '');
+      if (body.sortOrder !== undefined) s['排序'] = Number(body.sortOrder) || 0;
+      if (body.scores !== undefined && body.scores && typeof body.scores === 'object') {
+        s['打分'] = body.scores;
+      }
+      return json(res, 200, { ok: true });
+    }
+    if (req.method === 'DELETE') {
+      if (hit) {
+        const arr = hit.need.suppliers;
+        arr.splice(arr.indexOf(hit.supplier), 1);
+      }
+      return json(res, 200, { ok: true });
+    }
+    return json(res, 405, { error: 'Method Not Allowed' });
+  }
+  if ((m = url.pathname.match(/^\/api\/orders\/([^/]+)\/transition$/)) && req.method === 'POST') {
+    const hit = findOrder(decodeURIComponent(m[1]));
+    if (!hit) return json(res, 404, { error: 'not found' });
+    const VALID = ['待下单', '已下单', '已到', '已退', '已归档', '已取消'];
+    if (!VALID.includes(String(body.to || ''))) return json(res, 400, { error: '无效状态' });
+    hit.order['状态'] = String(body.to);
+    if (body.note !== undefined) hit.order['备注'] = String(body.note || '');
+    if (body.to === '已下单') hit.order['下单时间'] = nowDt;
+    if (body.to === '已到') hit.order['到货时间'] = nowDt;
+    if (body.to === '已归档') hit.order['归档时间'] = nowDt;
+    return json(res, 200, { ok: true });
+  }
+  if ((m = url.pathname.match(/^\/api\/orders\/([^/]+)$/)) && req.method === 'PUT') {
+    const hit = findOrder(decodeURIComponent(m[1]));
+    if (!hit) return json(res, 404, { error: 'not found' });
+    const o = hit.order;
+    if (['已归档', '已取消'].includes(o['状态'])) {
+      return json(res, 400, { error: '已归档/已取消的子单不可修改' });
+    }
+    if (body.qty !== undefined) o['数量'] = Number(body.qty) || 1;
+    if (body.pricePaid !== undefined) o['实付'] = Number(body.pricePaid) || 0;
+    if (body.installments !== undefined) o['分期期数'] = Number(body.installments) || 0;
+    if (body.installmentAmount !== undefined) o['分期金额'] = Number(body.installmentAmount) || 0;
+    if (body.installmentStart !== undefined) o['分期开始月'] = String(body.installmentStart || '');
+    if (body.installmentPaid !== undefined) o['分期已还'] = Number(body.installmentPaid) || 0;
+    if (body.date !== undefined) o['日期'] = body.date == null ? null : Date.parse(body.date) || o['日期'];
+    if (body.note !== undefined) o['备注'] = String(body.note || '');
+    if (body.setImage !== undefined || body.image !== undefined) o['图片'] = body.image || '';
+    return json(res, 200, { ok: true });
+  }
+
   if (url.pathname === '/api/items') {
     if (req.method === 'GET') return json(res, 200, items);
     if (req.method === 'POST') return json(res, 200, { id: 'rec_new' });
@@ -270,14 +532,37 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname === '/api/expenses') {
     if (req.method === 'GET') return json(res, 200, expenses);
+    if (req.method === 'DELETE') {
+      const id = url.searchParams.get('id');
+      const i = expenses.findIndex(e => e.id === id);
+      if (i >= 0) expenses.splice(i, 1);
+      return json(res, 200, { ok: true });
+    }
     return json(res, 200, { id: 'rec_e1' });
   }
   if (url.pathname === '/api/todos') {
-    if (req.method === 'GET') return json(res, 200, []);
+    if (req.method === 'GET') return json(res, 200, todos);
+    if (req.method === 'DELETE') {
+      const id = url.searchParams.get('id');
+      const i = todos.findIndex(t => t.id === id);
+      if (i >= 0) todos.splice(i, 1);
+      return json(res, 200, { ok: true });
+    }
+    if (req.method === 'POST') {
+      const id = 'rec_t' + (++seq);
+      todos.push(Object.assign({ id, title: body.title || '', status: body.status || '待办' }, body));
+      return json(res, 200, { id });
+    }
     return json(res, 200, { id: 'rec_t1' });
   }
   if (url.pathname === '/api/projects') {
-    if (req.method === 'GET') return json(res, 200, []);
+    if (req.method === 'GET') return json(res, 200, projects);
+    if (req.method === 'DELETE') {
+      const id = url.searchParams.get('id');
+      const i = projects.findIndex(p => p.id === id);
+      if (i >= 0) projects.splice(i, 1);
+      return json(res, 200, { ok: true });
+    }
     return json(res, 200, { id: 'p1' });
   }
   if (url.pathname === '/api/budgets') {

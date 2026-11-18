@@ -12,7 +12,7 @@ description: 安装、登录并使用购买 App MCP（采购/记账/待办/项�
 - **绝不询问、记录、回显用户的 App 密码**；不要把密码写进聊天、命令行参数、脚本或日志。
 - 需要密码的操作只能由用户在自己的终端完成（本机登录页或 `read -rs` 环境变量方式）。
 - 不要把 refresh/access token 写入聊天、文件或仓库；凭据只由程序保存到 `~/.config/purchase-app-mcp/auth.json`（0600）。
-- 未经用户明确同意，不执行写操作、删除、批量修改；安装后先只读验证。
+- 写操作分 **T0 / T1**（v1.4.0）：T0（创建、定点、推进、代写优缺点等）用户一句话意图即可执行；**T1（删除/取消/回退/终态/硬删/覆盖文档）必须先向用户展示一行预览（对象+后果+不可逆点），得到明确回复后再带 `confirm` 调用**，`confirm` 精确等于目标展示名。安装后先只读验证。
 - 修改 agent 配置前先备份；不修改与安装无关的配置。
 - 不要自行重启 ttyd/tmux 等父进程；重启命令交给用户在独立会话执行。
 
@@ -118,7 +118,24 @@ npx -y github:begin2019510/purchase-app-mcp status
 只读优先：`purchase.list`、`expense.list`、`todo.list`、`project.list`、`budget.get`、`analytics.summary`。
 `purchase.list/get` 与 `analytics.summary` 优先读 `/api/needs`（needStatus + 全部 orders/suppliers）；旧 App 自动回退 `/api/items`。`status` 可用需求状态/子单状态/旧 8 态。列表统一按日期倒序（最新在前），`limit=N` 恒为最新 N 条。
 
-写操作：`purchase.create/update/delete`、`expense.*`、`todo.*`、`project.*`、`budget.save`、`recurring.update`、`cats.update`。执行前先向用户确认，删除和批量修改必须确认。
+写操作分层：
+
+- **T0（直接写）**：`purchase.create`（含 `compareOnly`）、`purchase.decide`、`supplier.add/update`、`order.transition` 正向、`order.update`、`expense.create/update`、`todo.create/update` 与软删、`project.create/update`、`budget.save`、`phase.status.set`、普通字段 `purchase.update`。用户描述意图后即可执行。
+- **T1（二次授权）**：`purchase.delete/cancel/undecided`、终态 `purchase.update`、`supplier.delete`、`order.transition`→已退/已取消/已归档、`project.delete`、`expense.delete`、`todo.delete(purge=true)`、`cats.update`、`recurring.update`。
+
+**T1 铁律**：先给用户一行预览（对象 + 后果 + 不可逆点）→ 等明确同意 → 再调用并传 `confirm`：
+
+| 操作 | confirm 必须等于 |
+|------|------------------|
+| 采购删除/取消/回退定点/终态更新 | 需求名称 |
+| 供应商删除 | 供应商名称 |
+| 子单进终态 | 父需求名称 |
+| 项目删除 | 项目名称 |
+| 记账删除 | 备注（无备注则 ID） |
+| 待办硬删 | 待办标题 |
+| 分类/重复项覆盖 | `覆盖确认` |
+
+不传或传错 `confirm` 时 MCP 会报错并附目标摘要，**不会执行**。诚实边界：MCP 无法验证用户是否真的点头——请把预览写进对话，让同意可见。
 
 注意：`phase.status.set` 依赖 App 公网的 `/api/phases`。App 3.0.0+（含此前 4.0.52–4.0.61）已部署该端点；若返回“接口返回了网页而不是 JSON”，说明目标 App 版本过旧，**不要声称成功**，先让用户升级 App。
 
