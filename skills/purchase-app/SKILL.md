@@ -116,6 +116,7 @@ npx -y github:begin2019510/purchase-app-mcp status
 ## 5. 使用工具
 
 只读优先：`purchase.list`、`expense.list`、`todo.list`、`project.list`、`budget.get`、`analytics.summary`。
+`purchase.list/get` 与 `analytics.summary` 优先读 `/api/needs`（needStatus + 全部 orders/suppliers）；旧 App 自动回退 `/api/items`。`status` 可用需求状态/子单状态/旧 8 态。
 
 写操作：`purchase.create/update/delete`、`expense.*`、`todo.*`、`project.*`、`budget.save`、`recurring.update`、`cats.update`。执行前先向用户确认，删除和批量修改必须确认。
 
