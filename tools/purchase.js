@@ -1,19 +1,30 @@
 'use strict';
-// 采购域：purchase.list/get/create/update/delete（经 /api/items，服务端状态联动 Todo/分期规则照旧）
+// 采购域：purchase.list/get（优先 /api/needs 两级模型，旧部署回退 /api/items）
+// create/update/delete 仍走 /api/items 兼容写口：状态机/Todo/分期联动由服务端照旧处理。
 const { z } = require('zod');
 const { register } = require('./util');
-const { mapPurchase, applyFilters, requireField } = require('../lib/datamap');
+const {
+  applyFilters, requireField, loadPurchaseRead,
+  LEGACY_STATUSES, NEED_STATUSES, ORDER_STATUSES,
+} = require('../lib/datamap');
 
 const PHASE = z.number().int().min(0).max(5).nullable().optional();
+
+const STATUS_DESC = [
+  '需求状态：' + NEED_STATUSES.join('/'),
+  '或子单状态：' + ORDER_STATUSES.join('/'),
+  '（兼容旧词：' + LEGACY_STATUSES.filter(s => !NEED_STATUSES.includes(s) && !ORDER_STATUSES.includes(s)).join('/') + '）',
+  '——匹配需求状态、兼容状态或任一子单状态',
+].join('；');
 
 module.exports = function registerPurchase(server, ctx) {
   const { api } = ctx;
 
   register(server, ctx, 'purchase.list', {
     title: '采购列表',
-    description: '列出采购记录（按状态/分类/项目/关键词/日期区间筛选）。日期为毫秒时间戳；limit 取最近 N 条。',
+    description: '列出采购需求（两级模型：需求+供应商+子单）。status 可用需求状态/子单状态/旧 8 态；日期为毫秒时间戳；limit 取最近 N 条。返回 needStatus、orders、suppliers 等最新字段。',
     inputSchema: {
-      status: z.string().optional().describe('状态：待评估/待审批/已审批/已下单/已到/已退/已归档/已取消'),
+      status: z.string().optional().describe(STATUS_DESC),
       category: z.string().optional(),
       projectId: z.string().optional().describe('项目 ID（rec_N）'),
       keyword: z.string().optional(),
@@ -23,20 +34,25 @@ module.exports = function registerPurchase(server, ctx) {
     },
     annotations: { readOnlyHint: true },
   }, async (a) => {
-    const rows = (await api.get('/api/items')).map(mapPurchase);
-    const items = applyFilters(rows, a);
-    return { total: rows.length, count: items.length, items };
+    const loaded = await loadPurchaseRead(api);
+    const items = applyFilters(loaded.rows, a);
+    return {
+      total: loaded.rows.length,
+      count: items.length,
+      source: loaded.source,
+      items,
+    };
   });
 
   register(server, ctx, 'purchase.get', {
     title: '采购详情',
-    description: '按 ID 获取单条采购记录。',
+    description: '按 ID 获取单条采购需求详情（含 needStatus、全部 orders/suppliers）。',
     inputSchema: { id: z.string().describe('如 rec_123') },
     annotations: { readOnlyHint: true },
   }, async (a) => {
     requireField(a, 'id');
-    const rows = (await api.get('/api/items')).map(mapPurchase);
-    const item = rows.find(r => r.id === a.id);
+    const loaded = await loadPurchaseRead(api);
+    const item = loaded.rows.find(r => r.id === a.id);
     if (!item) throw new Error('采购记录不存在：' + a.id);
     return item;
   });

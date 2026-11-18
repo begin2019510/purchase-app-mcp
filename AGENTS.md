@@ -68,6 +68,7 @@ npx -y github:begin2019510/purchase-app-mcp logout
 ## 工具（27 个）
 
 - 采购：`purchase.list/get/create/update/delete`
+  - 读走 `/api/needs`（返回 needStatus + 全部 orders/suppliers）；旧 App 回退 `/api/items`。写仍走兼容口 `/api/items`。
 - 记账：`expense.list/create/update/delete`
 - 待办：`todo.list/create/update/delete`
 - 项目：`project.list/get/create/update/delete`、`phase.list`、`phase.status.set`

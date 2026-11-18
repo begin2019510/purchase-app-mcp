@@ -1,8 +1,9 @@
 'use strict';
 // 统计域：analytics.summary —— 从采购/记账/预算数据本地聚合（App 的统计规则在端上算，服务端无聚合接口）
+// 采购优先 /api/needs 展开全部子单（与 App orderRows 同口径），旧部署回退 /api/items
 const { z } = require('zod');
 const { register } = require('./util');
-const { mapPurchase, mapExpense } = require('../lib/datamap');
+const { mapExpense, loadPurchaseForAggregate } = require('../lib/datamap');
 
 const TZ = 8 * 3600 * 1000;
 const ACTIVE_BUY = ['已下单', '已到', '已归档'];
@@ -120,12 +121,12 @@ module.exports = function registerAnalytics(server, ctx) {
     const prevKey = monthKey(prev.y, prev.m);
     const prevRange = monthRange(prev.y, prev.m);
 
-    const [rawItems, rawExpenses, budgetDoc] = await Promise.all([
-      api.get('/api/items'),
+    const [purchaseLoad, rawExpenses, budgetDoc] = await Promise.all([
+      loadPurchaseForAggregate(api),
       api.get('/api/expenses'),
       api.get('/api/budgets').catch(() => ({ ok: true, data: {} })),
     ]);
-    const items = rawItems.map(mapPurchase);
+    const items = purchaseLoad.rows;
     const expenses = rawExpenses.map(mapExpense);
 
     const purchase = aggregatePurchases(items, start, end);
@@ -163,6 +164,7 @@ module.exports = function registerAnalytics(server, ctx) {
       budget,
       comparison: { prevMonth: prevKey, prevTotalSpend: prevTotal, deltaPct },
       topCategories,
+      source: purchaseLoad.source,
       generatedAt: Date.now(),
     };
   });

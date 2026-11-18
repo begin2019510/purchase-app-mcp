@@ -405,10 +405,10 @@ async function cmdInstall(argv) {
 
   if (!argv.includes('--no-verify')) {
     try {
-      const list = await api.get('/api/items');
-      const n = Array.isArray(list) ? list.length
-        : (list && Array.isArray(list.items) ? list.items.length : 0);
-      process.stdout.write('✅ 只读验证通过（采购记录 ' + n + ' 条）\n');
+      // 优先 /api/needs（两级模型）；旧部署回退 /api/items
+      const { loadPurchaseRead } = require('./lib/datamap');
+      const loaded = await loadPurchaseRead(api);
+      process.stdout.write('✅ 只读验证通过（采购记录 ' + loaded.rows.length + ' 条，source=' + loaded.source + '）\n');
     } catch (e) {
       process.exitCode = 1;
       process.stderr.write('⚠️  凭据已保存，但只读验证失败：' + e.message + '\n');

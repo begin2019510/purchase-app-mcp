@@ -80,6 +80,13 @@ function runCli(args, env) {
   assert(!r1.isError, '同一 MCP 进程在 CLI 登录后可直接使用');
   const list = JSON.parse(text(r1));
   assert(list.items.length === 1 && list.items[0].name === '测试商品' && list.items[0].price === 99 && list.items[0].qty === 2, '读接口中文字段映射正确');
+  assert(list.source === 'needs', 'purchase.list 优先读 /api/needs');
+  assert(list.items[0].needStatus === '已定点' && list.items[0].legacyStatus === '已下单' && list.items[0].orderStatus === '已下单', 'need 状态与兼容状态分离');
+  assert(Array.isArray(list.items[0].orders) && list.items[0].orders.length === 1 && Array.isArray(list.items[0].suppliers), '返回完整 orders/suppliers');
+  const rStatusNeed = await client.callTool({ name: 'purchase.list', arguments: { status: '已定点' } });
+  assert(!rStatusNeed.isError && JSON.parse(text(rStatusNeed)).items.length === 1, '按需求状态筛选');
+  const rStatusOrder = await client.callTool({ name: 'purchase.list', arguments: { status: '已下单' } });
+  assert(!rStatusOrder.isError && JSON.parse(text(rStatusOrder)).items.length === 1, '按子单状态筛选（兼容旧词表）');
 
   let state = await (await fetch(base + '/__state')).json();
   const beforeInvalidate = state.refreshCount;
@@ -99,6 +106,7 @@ function runCli(args, env) {
 
   const ra = await client.callTool({ name: 'analytics.summary', arguments: { month: '2026-10' } });
   assert(!ra.isError && JSON.parse(text(ra)).month === '2026-10', '月度统计聚合正常');
+  assert(JSON.parse(text(ra)).source === 'needs', '统计优先从 needs 子单聚合');
 
   const rp = await client.callTool({ name: 'phase.status.set', arguments: { projectId: 'p1', phaseIdx: 0, status: 'done' } });
   assert(rp.isError && /网页|JSON/.test(text(rp)), '缺失的公网阶段端点返回明确错误（不误报成功）');
@@ -180,7 +188,7 @@ function runCli(args, env) {
     '--local',
   ], env3);
   assert(/INSTALL_OK username=admin/.test(installOut), 'install 用链接完成注册、授权与只读验证');
-  assert(/只读验证通过（采购记录 1 条）/.test(installOut), 'install 结束后执行只读验证');
+  assert(/只读验证通过（采购记录 1 条，source=needs）/.test(installOut), 'install 结束后执行只读验证（needs）');
   assert(fs.existsSync(skillDir + '/SKILL.md') && fs.existsSync(cfgFile), 'install 同时安装 skill 并写入 MCP 配置');
 
   const auth3 = path.join(HOME3, 'auth.json');

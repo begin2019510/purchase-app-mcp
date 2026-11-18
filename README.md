@@ -198,12 +198,15 @@ npx -y github:begin2019510/purchase-app-mcp login             # 本机网页登�
 ## 工具（27 个）
 
 - 采购：`purchase.list` `purchase.get` `purchase.create` `purchase.update` `purchase.delete`
+  - **读**（list/get）优先 `GET /api/needs`（需求/供应商/子单两级模型），返回 `needStatus`、`legacyStatus`、`orderStatus`、完整 `orders`/`suppliers`；旧部署自动回退 `/api/items`。
+  - **写**（create/update/delete）仍走 `/api/items` 兼容口，服务端状态机/Todo/分期联动照旧。
+  - `status` 筛选同时接受：需求状态（对比中/已定点/已完成/已取消）、子单状态（待下单/已下单/…）、旧 8 态。
 - 记账：`expense.list` `expense.create` `expense.update` `expense.delete`
 - 待办：`todo.list` `todo.create` `todo.update` `todo.delete`
 - 项目：`project.list` `project.get` `project.create` `project.update` `project.delete` `phase.list` `phase.status.set`
 - 预算：`budget.get` `budget.save`
 - 重复项 / 分类：`recurring.list` `recurring.update` `cats.list` `cats.update`
-- 统计：`analytics.summary`（月度收入、采购、净支出、分期、预算使用率、分类 TOP、环比）
+- 统计：`analytics.summary`（月度收入、采购、净支出、分期、预算使用率、分类 TOP、环比）；采购侧优先从 needs 全量子单聚合（与 App `orderRows` 同口径）
 
 写操作全部走 App 真实业务 API，服务端的状态联动（审批、待办生成、分期、预算规则等）照常生效。
 

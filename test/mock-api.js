@@ -32,6 +32,62 @@ const items = [{
   '阶段': 0,
 }];
 
+// 两级模型（与 App /api/needs rowToNeed 同形）：读路径优先走这里
+const needs = [{
+  id: 'rec_mock_1',
+  '名称': '测试商品',
+  '分类': '数码',
+  '预算下限': null,
+  '预算上限': null,
+  '状态': '已定点',
+  '维度': [],
+  '定点供应商ID': 'rec_s1',
+  '定点供应商IDs': ['rec_s1'],
+  '项目ID': 'p1',
+  '阶段': 0,
+  '虚拟': '',
+  '极速': '',
+  '历史': '',
+  '取消原因': '',
+  '定点时间': '',
+  '创建时间': '2026-10-01 10:00',
+  suppliers: [{
+    id: 'rec_s1',
+    needId: 'rec_mock_1',
+    '谁': '京东',
+    '平台': '京东',
+    '报价': 99,
+    '图片': '',
+    '优点': '',
+    '缺点': '',
+    '备注': '',
+    '打分': {},
+    '排序': 0,
+  }],
+  orders: [{
+    id: 'rec_o1',
+    needId: 'rec_mock_1',
+    supplierId: 'rec_s1',
+    role: 'formal',
+    '数量': 2,
+    '实付': 99,
+    '状态': '已下单',
+    '分期期数': 0,
+    '分期金额': 0,
+    '分期开始月': '',
+    '分期已还': 0,
+    '日期': Date.now(),
+    '图片': '',
+    '备注': 'mock',
+    '极速': '',
+    '创建时间': '2026-10-01 10:00',
+    '审批时间': '',
+    '下单时间': '',
+    '到货时间': '',
+    '归档时间': '',
+  }],
+}];
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
   const auth = req.headers.authorization || '';
@@ -119,6 +175,11 @@ const server = http.createServer(async (req, res) => {
   // 业务接口：除 /api/phases 外都要求有效 access token
   if (!validAccess.has(token)) return json(res, 401, { error: '未授权：请登录' });
 
+  if (url.pathname === '/api/needs') {
+    // 两级模型读路径（MCP 优先）
+    if (req.method === 'GET') return json(res, 200, needs);
+    return json(res, 405, { error: 'Method Not Allowed' });
+  }
   if (url.pathname === '/api/items') {
     if (req.method === 'GET') return json(res, 200, items);
     if (req.method === 'POST') return json(res, 200, { id: 'rec_new' });
