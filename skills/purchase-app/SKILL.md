@@ -163,6 +163,25 @@ npx -y github:begin2019510/purchase-app-mcp status
    - 是否有无法溯源的绝对化断言？→ 删掉或改成「未查到」。  
    - 写完 `purchase.get` 确认 `pros`/`cons` 已落库，再考虑 `purchase.decide`。
 
+### 综合推荐怎么写（`purchase.update` 的 `recommendation` + `recommendSupplierId`）
+
+逐家 `pros`/`cons` 写完后，**再写一条需求级「综合推荐」**——App 详情页会显示绿色横幅并高亮该供应商。**T0 可直接写**，但和优缺点同一套铁律：
+
+1. **结论必须点名**：用 `recommendSupplierId` 指向具体供应商（`purchase.get` 里 `suppliers[].id`）；文本里也要写清是谁。  
+2. **必须锚定价格**：说明同价位谁强、贵在哪、便宜牺牲了什么（「¥199 档…」而非「更好」）。  
+3. **以真实评价为基准**：结论要能对上各家 `pros`/`cons` 的可溯源事实；查不到就写「未查到」，禁止编造。  
+4. **结构建议**：1 句推荐谁 + 2～3 句为什么（价格/短板对比）+ 1 句什么情况下换另一家。总长 ≤500 字即可（服务端上限 5000）。  
+5. **顺序**：`supplier.add/update` 写优缺点 → `purchase.update` 写综合推荐 → `purchase.get` 回读 → 用户点头后再 `purchase.decide`。  
+6. **推荐 ≠ 定点**：`recommendation` 只是对比结论；正式定点仍走 `purchase.decide`（或用户在 App 里点「定点这家」）。
+
+```text
+purchase.update({
+  id: 'rec_…',
+  recommendation: '推荐京东自营：到手 ¥199 且 7 天无理由；拼多多同款 ¥189 但差评集中物流破损。若必须压到 ¥190 内可改选拼多多。',
+  recommendSupplierId: 'rec_s…'   // 清除则传 ''
+})
+```
+
 注意：`phase.status.set` 依赖 App 公网的 `/api/phases`。App 3.0.0+（含此前 4.0.52–4.0.61）已部署该端点；若返回“接口返回了网页而不是 JSON”，说明目标 App 版本过旧，**不要声称成功**，先让用户升级 App。
 
 ## 6. 吊销与排障

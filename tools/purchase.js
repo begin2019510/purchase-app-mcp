@@ -134,7 +134,7 @@ module.exports = function registerPurchase(server, ctx) {
 
   register(server, ctx, 'purchase.update', {
     title: '更新采购',
-    description: '更新采购字段或推进状态（状态推进时服务端会联动生成/完成待办、生成分期待办）。status 为终态（' + TERMINAL_WRITE.join('/') + '）时需要 T1：confirm=需求名称。',
+    description: '更新采购字段或推进状态（状态推进时服务端会联动生成/完成待办、生成分期待办）。可用 recommendation + recommendSupplierId 写「综合推荐」（对比结论，T0）。status 为终态（' + TERMINAL_WRITE.join('/') + '）时需要 T1：confirm=需求名称。',
     inputSchema: {
       id: z.string().describe('如 rec_123'),
       name: z.string().optional(),
@@ -146,7 +146,9 @@ module.exports = function registerPurchase(server, ctx) {
       date: z.string().optional(),
       setDate: z.boolean().optional().describe('把日期设为当前时间'),
       note: z.string().optional(),
-      evalSummary: z.string().optional(),
+      evalSummary: z.string().optional().describe('旧名；等价于综合推荐 recommendation'),
+      recommendation: z.string().optional().describe('综合推荐结论文本（谁更值得买+为什么，须锚定价格）'),
+      recommendSupplierId: z.string().nullable().optional().describe('推荐供应商 ID（rec_…）；传空字符串清除'),
       buyReason: z.string().optional(),
       budgetRange: z.string().optional(),
       cancelReason: z.string().optional(),
@@ -166,7 +168,11 @@ module.exports = function registerPurchase(server, ctx) {
       assertConfirm(a.confirm, item.name,
         '将「' + item.name + '」状态写为 ' + a.status + '（终态，历史账目冻结）');
     }
-    await api.put('/api/items', a);
+    const body = { ...a };
+    // agent 友好名 → 服务端字段（/api/items PUT）
+    if (a.recommendation !== undefined) body.evalSummary = a.recommendation;
+    if (a.recommendSupplierId !== undefined) body.recommendSupplierId = a.recommendSupplierId;
+    await api.put('/api/items', body);
     return { ok: true };
   });
 

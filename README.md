@@ -237,6 +237,8 @@ npx -y github:begin2019510/purchase-app-mcp login             # 本机网页登�
 
 **代写供应商优缺点（`supplier.add`/`supplier.update`）**：T0 直接写，但 skill 规定内容必须**以真实评价为基准**，且**每条优劣都要锚定价格**（到手价或同价位对比）；禁止无价格的通用套话与编造数据。详见 [SKILL.md](skills/purchase-app/SKILL.md)。
 
+**综合推荐（`purchase.update` 的 `recommendation` + `recommendSupplierId`）**：T0 直接写。对比结论落需求级字段（服务端 `eval_summary` + `recommend_supplier_id`），App 详情页显示「💡 综合推荐」横幅并高亮推荐供应商；与优缺点同套铁律（点名供应商、锚定价格、真实评价），**推荐 ≠ 定点**（定点仍走 `purchase.decide`）。
+
 ### 阶段工具与版本要求
 
 `phase.list` 与 `phase.status.set` 都走 App 公网 API。**App 3.0.0+**（2026-10 版本线重置；此前 4.0.52–4.0.61 同样包含）已部署 `/api/phases` 与 `/api/phase-items`，阶段状态/规划时间/交付物均可用。

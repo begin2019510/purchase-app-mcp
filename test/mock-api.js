@@ -52,6 +52,8 @@ const needs = [{
   '取消原因': '',
   '定点时间': '',
   '创建时间': '2026-10-01 10:00',
+  '综合推荐': '',
+  '推荐供应商ID': '',
   suppliers: [{
     id: 'rec_s1',
     needId: 'rec_mock_1',
@@ -104,6 +106,8 @@ const needs = [{
   '取消原因': '',
   '定点时间': '',
   '创建时间': '2026-11-15 12:00',
+  '综合推荐': '',
+  '推荐供应商ID': '',
   suppliers: [],
   orders: [],
 }, {
@@ -123,6 +127,8 @@ const needs = [{
   '取消原因': '',
   '定点时间': '',
   '创建时间': '2026-09-01 09:00',
+  '综合推荐': '',
+  '推荐供应商ID': '',
   suppliers: [],
   orders: [],
 }];
@@ -527,7 +533,18 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === '/api/items') {
     if (req.method === 'GET') return json(res, 200, items);
     if (req.method === 'POST') return json(res, 200, { id: 'rec_new' });
-    if (req.method === 'PUT') return json(res, 200, { ok: true });
+    if (req.method === 'PUT') {
+      // body 已在请求入口统一解析
+      const need = needs.find(n => n.id === body.id);
+      if (need) {
+        if (body.evalSummary !== undefined) need['综合推荐'] = String(body.evalSummary || '');
+        if (body.recommendation !== undefined) need['综合推荐'] = String(body.recommendation || '');
+        if (body.recommendSupplierId !== undefined) need['推荐供应商ID'] = body.recommendSupplierId || '';
+      }
+      const it = items.find(i => i.id === body.id);
+      if (it && body.evalSummary !== undefined) it['评估摘要'] = String(body.evalSummary || '');
+      return json(res, 200, { ok: true });
+    }
     if (req.method === 'DELETE') return json(res, 200, { ok: true });
   }
   if (url.pathname === '/api/expenses') {

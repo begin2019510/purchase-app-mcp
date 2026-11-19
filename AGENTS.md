@@ -63,7 +63,7 @@ npx -y github:begin2019510/purchase-app-mcp logout
 4. 写操作分两层（v1.4.0）：
    - **T0**（一句话意图即可）：创建、定点、推进状态、代写供应商优缺点、普通字段更新、软删待办等。
    - **T1（二次授权）**：删除/取消/回退定点/终态写入/硬删待办/覆盖分类与重复项。**必须先向用户展示一行预览（对象+后果+不可逆点），得到明确回复后再带 `confirm` 调用**；`confirm` 精确等于目标展示名（见下表），不匹配 MCP 会拒绝执行。
-   - 代写供应商 `pros`/`cons`（`supplier.add/update`）：**以真实评价为基准，且必须锚定价格**——脱离到手价/同价位对比不写空泛优劣；查不到写「未查到」，禁止编造。细则见 [skills/purchase-app/SKILL.md](skills/purchase-app/SKILL.md)。
+   - 代写供应商 `pros`/`cons`（`supplier.add/update`）与**综合推荐**（`purchase.update` 的 `recommendation` + `recommendSupplierId`）：**以真实评价为基准，且必须锚定价格**——脱离到手价/同价位对比不写空泛优劣；查不到写「未查到」，禁止编造。综合推荐须点名推荐供应商；推荐 ≠ 定点。细则见 [skills/purchase-app/SKILL.md](skills/purchase-app/SKILL.md)。
 5. 修改 agent 配置前先备份；不要改与安装无关的配置。
 6. 不要自行重启 ttyd / tmux 等父进程；需要重启的情况把命令交给用户在独立会话执行。
 7. 票据、凭据都按「哪个 agent 用就由哪个 agent 自己持有」处理，禁止在 agent 之间共享同一个 token。
@@ -71,6 +71,7 @@ npx -y github:begin2019510/purchase-app-mcp logout
 ## 工具（35 个）
 
 - 采购：`purchase.list/get/create/update/delete`、`purchase.decide/undecided/cancel`
+  - `purchase.update` 可写综合推荐：`recommendation` + `recommendSupplierId`（T0）
 - 供应商：`supplier.add/update/delete`
 - 子单：`order.transition`、`order.update`
   - 读走 `/api/needs`（返回 needStatus + 全部 orders/suppliers）；旧 App 回退 `/api/items`。写按 v1.4.0 分层（compareOnly→`/api/needs`，定点/供应商/子单走原生口，其余仍兼容口）。

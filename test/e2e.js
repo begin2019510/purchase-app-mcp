@@ -308,6 +308,20 @@ function runCli(args, env) {
   const gotSup = (gotNeed.suppliers || []).find(s => s.id === supId);
   assert(gotSup && gotSup.pros === '价格低、包邮' && gotSup.cons === '售后一般', '优缺点已写入供应商');
 
+  // 综合推荐（T0）：写结论 + 指定推荐供应商，回读一致
+  const rRec = await clientW.callTool({
+    name: 'purchase.update',
+    arguments: {
+      id: newNeed.id,
+      recommendation: '推荐供应商A：¥50 档包邮且差评未见，比 B 便宜 ¥10',
+      recommendSupplierId: supId,
+    },
+  });
+  assert(!rRec.isError, 'purchase.update 写综合推荐（T0）');
+  const gotRec = JSON.parse(text(await clientW.callTool({ name: 'purchase.get', arguments: { id: newNeed.id } })));
+  assert(gotRec.recommendation && gotRec.recommendation.indexOf('推荐供应商A') >= 0, '综合推荐文本已回读');
+  assert(gotRec.recommendSupplierId === supId, '推荐供应商 ID 已回读');
+
   const rDec = await clientW.callTool({
     name: 'purchase.decide',
     arguments: { needId: newNeed.id, supplierId: supId },
