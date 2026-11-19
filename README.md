@@ -235,6 +235,8 @@ npx -y github:begin2019510/purchase-app-mcp login             # 本机网页登�
 
 诚实边界：MCP 无法真正验证「用户已点头」——与 GitHub 删除仓库同构：参数在工具调用中可见 + 本机 `audit.log` 留痕，作为标准折中。skill 铁律：T1 调用前必须先展示一行预览并得到用户明确回复。
 
+**代写供应商优缺点（`supplier.add`/`supplier.update`）**：T0 直接写，但 skill 规定内容必须**以真实评价为基准**，且**每条优劣都要锚定价格**（到手价或同价位对比）；禁止无价格的通用套话与编造数据。详见 [SKILL.md](skills/purchase-app/SKILL.md)。
+
 ### 阶段工具与版本要求
 
 `phase.list` 与 `phase.status.set` 都走 App 公网 API。**App 3.0.0+**（2026-10 版本线重置；此前 4.0.52–4.0.61 同样包含）已部署 `/api/phases` 与 `/api/phase-items`，阶段状态/规划时间/交付物均可用。
