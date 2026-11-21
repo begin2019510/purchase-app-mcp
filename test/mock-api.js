@@ -146,6 +146,43 @@ const projects = [{
   phases: [],
   items: [],
   spend: { buy: 0, exp: 0 },
+}, {
+  // 跟踪项目夹具（v1.5.0 tracker.* 工具用）
+  id: 'rec_ptrack',
+  name: '测试跟踪',
+  description: '',
+  status: '进行中',
+  color: '',
+  budget: null,
+  projectType: 'track',
+  phases: [],
+  items: [],
+  spend: { buy: 0, exp: 0 },
+  recordCount: 1,
+  trackFields: [
+    { key: 'date', name: '日期', type: 'date' },
+    { key: 'weight', name: '体重', type: 'number', unit: 'kg' },
+    { key: 'note', name: '备注', type: 'text' },
+  ],
+  trackConfig: {
+    goal: { text: '减到 70kg', kind: 'number', metric: { agg: 'latest', field: 'weight', value: '' }, target: 70, unit: 'kg', direction: 'down', baseline: 75 },
+    week: { target: 3, unit: '次', metric: { agg: 'count', field: '', value: '' } },
+    startDate: '2026-11-01',
+    targetDate: '2027-02-01',
+    milestones: [{ id: 'm1', name: '第一周', targetDate: '2026-11-07', targetValue: null, done: false, doneDate: '' }],
+    dateField: 'date',
+    titleField: 'note',
+    kanbanField: '',
+    closed: null,
+  },
+}];
+
+// 跟踪记录夹具（记录日期只到天）
+const trackRecords = [{
+  id: 'rec_tr1',
+  projectId: 'rec_ptrack',
+  recordDate: '2026-11-20',
+  data: { date: '2026-11-20', weight: 71.2, note: '跑步3km' },
 }];
 const todos = [{
   id: 'rec_t1',
@@ -547,6 +584,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'DELETE') return json(res, 200, { ok: true });
   }
+  // 服务端把纯日期存成 00:00；mock 直接拒绝，端到端锁住「时间不丢」
+  const dateOnlyErr = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+
   if (url.pathname === '/api/expenses') {
     if (req.method === 'GET') return json(res, 200, expenses);
     if (req.method === 'DELETE') {
@@ -554,6 +594,15 @@ const server = http.createServer(async (req, res) => {
       const i = expenses.findIndex(e => e.id === id);
       if (i >= 0) expenses.splice(i, 1);
       return json(res, 200, { ok: true });
+    }
+    if (req.method === 'POST') {
+      if (dateOnlyErr(body.date)) return json(res, 400, { error: '日期必须带时刻' });
+      expenses.push({
+        id: 'rec_e' + (++seq), '日期': body.date, '类型': body.type || '支出',
+        '分类': body.category || '其他', '金额': body.amount, '备注': body.note || '',
+        '分摊周数': 0, '分摊开始周': '', '图片': '', '项目ID': body.projectId || '', '阶段': null,
+      });
+      return json(res, 200, { id: 'rec_e' + seq });
     }
     return json(res, 200, { id: 'rec_e1' });
   }
@@ -566,9 +615,16 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true });
     }
     if (req.method === 'POST') {
+      if (dateOnlyErr(body.dueDate)) return json(res, 400, { error: '截止时间必须带时刻' });
       const id = 'rec_t' + (++seq);
       todos.push(Object.assign({ id, title: body.title || '', status: body.status || '待办' }, body));
       return json(res, 200, { id });
+    }
+    if (req.method === 'PUT') {
+      if (dateOnlyErr(body.dueDate)) return json(res, 400, { error: '截止时间必须带时刻' });
+      const t = todos.find(x => x.id === body.id);
+      if (t && body.dueDate !== undefined) t.dueDate = body.dueDate;
+      return json(res, 200, { ok: true });
     }
     return json(res, 200, { id: 'rec_t1' });
   }
@@ -580,7 +636,105 @@ const server = http.createServer(async (req, res) => {
       if (i >= 0) projects.splice(i, 1);
       return json(res, 200, { ok: true });
     }
+    if (req.method === 'POST') {
+      const id = 'rec_p' + (++seq);
+      projects.push({
+        id, name: body.name || '', description: body.description || '', dueDate: body.dueDate || '',
+        status: body.status || '进行中', color: body.color || '', budget: body.budget == null ? null : body.budget,
+        currentPhase: 0, projectType: body.projectType === 'track' ? 'track' : 'plan',
+        phases: [], items: [], spend: { buy: 0, exp: 0 },
+        trackFields: body.trackFields || [], trackConfig: body.trackConfig || null,
+        steps: body.steps || [], recordCount: 0,
+      });
+      return json(res, 200, {
+        id, ok: true, projectType: body.projectType === 'track' ? 'track' : 'plan',
+        steps: Array.isArray(body.steps) ? body.steps.length : 0,
+      });
+    }
     return json(res, 200, { id: 'p1' });
+  }
+
+  // ---- 跟踪项目（v1.5.0）----
+  const trackProject = (id) => projects.find(p => p.id === id && p.projectType === 'track') || null;
+  if (url.pathname === '/api/tracker/records') {
+    if (req.method === 'GET') {
+      const pid = url.searchParams.get('projectId');
+      if (!trackProject(pid)) return json(res, 404, { error: '跟踪项目不存在' });
+      const limit = Number(url.searchParams.get('limit')) || 500;
+      const rows = trackRecords.filter(r => r.projectId === pid)
+        .sort((a, b) => (a.recordDate < b.recordDate ? 1 : a.recordDate > b.recordDate ? -1 : 0))
+        .slice(0, limit);
+      return json(res, 200, rows);
+    }
+    if (req.method === 'POST') {
+      if (!trackProject(body.projectId)) return json(res, 404, { error: '跟踪项目不存在' });
+      const data = body.data && typeof body.data === 'object' ? body.data : {};
+      const rec = {
+        id: 'rec_tr' + (++seq), projectId: body.projectId,
+        recordDate: String(data.date || '2026-11-21').slice(0, 10), data,
+      };
+      trackRecords.push(rec);
+      return json(res, 200, rec);
+    }
+    if (req.method === 'PUT') {
+      const rec = trackRecords.find(r => r.id === body.id);
+      if (!rec) return json(res, 404, { error: '记录不存在' });
+      rec.data = body.data && typeof body.data === 'object' ? body.data : rec.data;
+      if (rec.data.date) rec.recordDate = String(rec.data.date).slice(0, 10);
+      return json(res, 200, rec);
+    }
+    if (req.method === 'DELETE') {
+      const id = url.searchParams.get('id');
+      const i = trackRecords.findIndex(r => r.id === id);
+      if (i >= 0) trackRecords.splice(i, 1);
+      return json(res, 200, { ok: true });
+    }
+    return json(res, 405, { error: 'Method Not Allowed' });
+  }
+  if (url.pathname === '/api/tracker/overview' && req.method === 'GET') {
+    const p = trackProject(url.searchParams.get('projectId'));
+    if (!p) return json(res, 404, { error: '跟踪项目不存在' });
+    const recs = trackRecords.filter(r => r.projectId === p.id);
+    return json(res, 200, {
+      fields: p.trackFields, config: p.trackConfig, today: '2026-11-21',
+      records: { total: recs.length },
+      goal: { text: p.trackConfig.goal.text, pct: 50, achieved: false },
+      week: { count: 1, target: 3, met: false },
+      streak: 1, milestones: p.trackConfig.milestones, report: null,
+    });
+  }
+  if (url.pathname === '/api/tracker/fields' && req.method === 'PUT') {
+    const p = trackProject(body.projectId);
+    if (!p) return json(res, 404, { error: '跟踪项目不存在' });
+    if (body.fields !== undefined) p.trackFields = body.fields;
+    if (body.config !== undefined) p.trackConfig = body.config;
+    return json(res, 200, { ok: true, fields: p.trackFields, config: p.trackConfig });
+  }
+  if (url.pathname === '/api/tracker/milestone' && req.method === 'POST') {
+    const p = trackProject(body.projectId);
+    if (!p) return json(res, 404, { error: '跟踪项目不存在' });
+    const ms = (p.trackConfig.milestones || []).find(m => m.id === body.id);
+    if (!ms) return json(res, 404, { error: '里程碑不存在' });
+    ms.done = !!body.done;
+    ms.doneDate = body.done ? (body.doneDate || '2026-11-21') : '';
+    return json(res, 200, { ok: true, milestones: p.trackConfig.milestones });
+  }
+  if (url.pathname === '/api/tracker/close' && req.method === 'POST') {
+    const p = trackProject(body.projectId);
+    if (!p) return json(res, 404, { error: '跟踪项目不存在' });
+    p.status = '已完成';
+    p.trackConfig.closed = { at: Date.now(), result: body.result || 'achieved', note: body.note || '' };
+    return json(res, 200, {
+      ok: true, closed: p.trackConfig.closed,
+      report: { summary: 'mock 结项报告', records: trackRecords.filter(r => r.projectId === p.id).length },
+    });
+  }
+  if (url.pathname === '/api/tracker/reopen' && req.method === 'POST') {
+    const p = trackProject(body.projectId);
+    if (!p) return json(res, 404, { error: '跟踪项目不存在' });
+    p.status = '进行中';
+    p.trackConfig.closed = null;
+    return json(res, 200, { ok: true, config: p.trackConfig });
   }
   if (url.pathname === '/api/budgets') {
     if (req.method === 'GET') return json(res, 200, { ok: true, data: { '2026-10': { total: 1000 } } });

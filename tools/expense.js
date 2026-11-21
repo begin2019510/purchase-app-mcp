@@ -4,6 +4,9 @@ const { z } = require('zod');
 const { register } = require('./util');
 const { mapExpense, applyFilters, requireField } = require('../lib/datamap');
 const { assertConfirm } = require('../lib/confirm');
+const { normalizeDateTime, nowBj } = require('../lib/time');
+
+const DATE_DESC = '北京时间，必须带时刻：YYYY-MM-DDTHH:mm（如 2026-11-20T19:30）。禁止只传 YYYY-MM-DD——服务端会存成当天 00:00，时间就被抹掉了。用户说「昨晚7点多」请先用 time.parse 或 time.now。';
 
 const TYPES = ['支出', '收入', '采购'];
 
@@ -31,12 +34,12 @@ module.exports = function registerExpense(server, ctx) {
 
   register(server, ctx, 'expense.create', {
     title: '记一笔',
-    description: '新增收支记录。金额 0~999999；type 默认支出。',
+    description: '新增收支记录。金额 0~999999；type 默认支出。date 必须带北京时间时刻（YYYY-MM-DDTHH:mm）；不传则记为当前时刻。返回值会回显实际写入的日期时间，请核对。',
     inputSchema: {
       amount: z.number().min(0).max(999999),
       type: z.enum(TYPES).optional(),
       category: z.string().optional().describe('分类，默认其他'),
-      date: z.string().optional().describe('日期 YYYY-MM-DD，默认今天'),
+      date: z.string().optional().describe(DATE_DESC + ' 不传=当前时刻'),
       note: z.string().optional(),
       splitWeeks: z.number().int().min(0).optional().describe('分摊周数'),
       splitStartWeek: z.string().optional().describe('分摊开始周'),
@@ -45,8 +48,11 @@ module.exports = function registerExpense(server, ctx) {
     },
   }, async (a) => {
     requireField(a, 'amount', '金额');
-    const r = await api.post('/api/expenses', a);
-    return { ok: true, id: r && r.id };
+    const date = a.date === undefined || a.date === null || a.date === ''
+      ? nowBj().iso
+      : normalizeDateTime(a.date, '记账日期').iso;
+    const r = await api.post('/api/expenses', { ...a, date });
+    return { ok: true, id: r && r.id, date, note: '已按北京时间 ' + date + ' 记账' };
   });
 
   register(server, ctx, 'expense.update', {
@@ -57,7 +63,7 @@ module.exports = function registerExpense(server, ctx) {
       amount: z.number().min(0).max(999999).optional(),
       type: z.enum(TYPES).optional(),
       category: z.string().optional(),
-      date: z.string().optional(),
+      date: z.string().optional().describe(DATE_DESC),
       note: z.string().optional(),
       splitWeeks: z.number().int().min(0).optional(),
       splitStartWeek: z.string().optional(),
@@ -66,8 +72,12 @@ module.exports = function registerExpense(server, ctx) {
     },
   }, async (a) => {
     requireField(a, 'id');
-    await api.put('/api/expenses', a);
-    return { ok: true };
+    const body = { ...a };
+    if (body.date !== undefined && body.date !== null && body.date !== '') {
+      body.date = normalizeDateTime(body.date, '记账日期').iso;
+    }
+    await api.put('/api/expenses', body);
+    return { ok: true, ...(body.date ? { date: body.date } : {}) };
   });
 
   register(server, ctx, 'expense.delete', {

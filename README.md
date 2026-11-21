@@ -195,7 +195,16 @@ npx -y github:begin2019510/purchase-app-mcp login             # 本机网页登�
 | `PURCHASE_APP_USERNAME` | 登录用户名，默认 `admin` |
 | `PURCHASE_APP_PASSWORD` | 仅用于无浏览器环境的一次性登录；不保存 |
 
-## 工具（35 个）
+## 工具（46 个）
+
+### 时间规则（v1.5.0 硬要求）
+
+**记账 / 采购 / 待办的时间必须带时刻，一律用北京时间 `YYYY-MM-DDTHH:mm`。** 纯日期（如 `2026-11-20`）会被服务端存成当天 00:00，等于把用户说的时间抹掉；v1.5.0 起 MCP 直接拒绝纯日期并提示补时刻。
+
+- 用户说「昨晚 7 点多」→ 先调 `time.parse({ text: '昨晚7点多' })` 得到 `2026-11-20T19:00`，再写入；不要自己心算。
+- 只有日期没有时刻时，`time.parse` 返回 `needTime: true`，**必须先问用户几点**，禁止用 00:00 代替。
+- 不确定「今天/现在」时先调 `time.now`（返回北京时间 ISO、星期、时区）。
+- 项目截止日、跟踪记录里的日期字段可只到天，这类字段内部用 `allowDateOnly` 处理。
 
 - 采购：`purchase.list` `purchase.get` `purchase.create` `purchase.update` `purchase.delete`
   `purchase.decide` `purchase.undecided` `purchase.cancel`
@@ -208,18 +217,25 @@ npx -y github:begin2019510/purchase-app-mcp login             # 本机网页登�
 - 记账：`expense.list` `expense.create` `expense.update` `expense.delete`
 - 待办：`todo.list` `todo.create` `todo.update` `todo.delete`
 - 项目：`project.list` `project.get` `project.create` `project.update` `project.delete` `phase.list` `phase.status.set`
+  - `project.create` 支持两类项目：阶段计划（默认，可传 `steps` 一次拆成最多 6 步，每步可带 `name/budget/plannedDays`）与长期跟踪（`projectType: 'track'` + `trackFields` + `trackConfig`，至少要有 `goal.text`）。
+  - `project.list/get` 返回 `projectType` 与阶段；跟踪项目额外返回目标进度、周目标、连续达标、里程碑、记录数等汇总。
+- 跟踪项目（长期跟踪专用，v1.5.0 新增）：
+  - 读：`tracker.records.list` `tracker.overview`
+  - 写：`tracker.record.create` `tracker.record.update` `tracker.fields.update` `tracker.milestone.set` `tracker.reopen`
+  - 高危（T1）：`tracker.record.delete`（confirm=记录标题）、`tracker.close`（confirm=项目名称）
+- 时间：`time.now` `time.parse`（只读，用于把「昨晚 7 点多」解析成北京时间 ISO，写入前必用）
 - 预算：`budget.get` `budget.save`
 - 重复项 / 分类：`recurring.list` `recurring.update` `cats.list` `cats.update`
 - 统计：`analytics.summary`（月度收入、采购、净支出、分期、预算使用率、分类 TOP、环比）；采购侧优先从 needs 全量子单聚合（与 App `orderRows` 同口径）
 
 写操作全部走 App 真实业务 API，服务端的状态联动（审批、待办生成、分期、预算规则等）照常生效。
 
-### 写操作分层（v1.4.0：T0 直接写 / T1 二次授权）
+### 写操作分层（v1.4.0 起：T0 直接写 / T1 二次授权）
 
 | 层 | 含义 | 工具 |
 |----|------|------|
 | **T0** | 用户一句话意图即可执行（创建、推进、代写优缺点等） | `purchase.create`（含 `compareOnly`）、`purchase.decide`、`supplier.add`、`supplier.update`、`order.transition` 正向（待下单→已下单→已到→已归档）、`order.update`、`expense.*` 增改、`todo.*` 增改与软删、`project.*` 增改、`budget.save`、`phase.status.set`、普通字段的 `purchase.update` |
-| **T1** | 高危：必须先给用户一行预览（对象+后果+不可逆点），得到明确同意后带 `confirm` 调用 | `purchase.delete` / `purchase.cancel` / `purchase.undecided` / `purchase.update`（status 为已退/已取消/已归档）、`supplier.delete`、`order.transition` 进入已退/已取消/已归档、`project.delete`、`expense.delete`、`todo.delete(purge=true)`、`cats.update`、`recurring.update` |
+| **T1** | 高危：必须先给用户一行预览（对象+后果+不可逆点），得到明确同意后带 `confirm` 调用 | `purchase.delete` / `purchase.cancel` / `purchase.undecided` / `purchase.update`（status 为已退/已取消/已归档）、`supplier.delete`、`order.transition` 进入已退/已取消/已归档、`project.delete`、`expense.delete`、`todo.delete(purge=true)`、`tracker.close`、`tracker.record.delete`、`cats.update`、`recurring.update` |
 
 **`confirm` 规则**（MCP 在执行前先读目标真实名称再比对，不匹配直接报错、不执行）：
 
@@ -231,6 +247,8 @@ npx -y github:begin2019510/purchase-app-mcp login             # 本机网页登�
 | `project.delete` | 项目名称 |
 | `expense.delete` | 备注（无备注则 ID） |
 | `todo.delete(purge=true)` | 待办标题 |
+| `tracker.close` | 跟踪项目名称 |
+| `tracker.record.delete` | 记录标题（无标题则日期或记录 ID） |
 | `cats.update` / `recurring.update` | 固定字面量 `覆盖确认` |
 
 诚实边界：MCP 无法真正验证「用户已点头」——与 GitHub 删除仓库同构：参数在工具调用中可见 + 本机 `audit.log` 留痕，作为标准折中。skill 铁律：T1 调用前必须先展示一行预览并得到用户明确回复。

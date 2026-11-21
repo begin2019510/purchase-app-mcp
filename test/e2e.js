@@ -59,13 +59,17 @@ function runCli(args, env) {
 
   const tools = await client.listTools();
   const names = tools.tools.map(t => t.name);
-  assert(names.length === 35, 'tools/list 共 35 个工具（v1.4.0 含写工具），实际 ' + names.length);
+  assert(names.length === 46, 'tools/list 共 46 个工具（v1.5.0 含时间/跟踪项目），实际 ' + names.length);
   assert(
     ['purchase.list', 'phase.status.set', 'analytics.summary',
       'supplier.add', 'supplier.update', 'supplier.delete',
       'purchase.decide', 'purchase.undecided', 'purchase.cancel',
-      'order.transition', 'order.update'].every(n => names.includes(n)),
-    'tools/list 注册完整（含 v1.4.0 写/授权工具）'
+      'order.transition', 'order.update',
+      'time.now', 'time.parse',
+      'tracker.records.list', 'tracker.overview', 'tracker.record.create',
+      'tracker.record.update', 'tracker.record.delete', 'tracker.fields.update',
+      'tracker.milestone.set', 'tracker.close', 'tracker.reopen'].every(n => names.includes(n)),
+    'tools/list 注册完整（含 v1.5.0 时间/跟踪工具）'
   );
   assert(!names.some(n => /user|deploy|shell|log/i.test(n)), '不含用户管理/部署/shell 类工具');
 
@@ -439,6 +443,122 @@ function runCli(args, env) {
     arguments: { patch: { items: [] }, confirm: '覆盖确认' },
   });
   assert(!rRecOk.isError, 'recurring.update confirm 匹配后执行');
+
+  // ===== v1.5.0：时间语义 + 跟踪项目 =====
+  const rNow = await clientW.callTool({ name: 'time.now', arguments: {} });
+  const nowDoc = JSON.parse(text(rNow));
+  assert(!rNow.isError && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(nowDoc.iso), 'time.now 返回带时刻的北京时间 ISO');
+
+  const rParse = await clientW.callTool({
+    name: 'time.parse',
+    arguments: { text: '昨天晚上7点多', now: '2026-11-21T10:00' },
+  });
+  const parsed = JSON.parse(text(rParse));
+  assert(!rParse.isError && parsed.iso === '2026-11-20T19:00', 'time.parse 把「昨天晚上7点多」解析为 2026-11-20T19:00');
+  const rParse2 = await clientW.callTool({
+    name: 'time.parse',
+    arguments: { text: '明天上午9点', now: '2026-11-21T10:00' },
+  });
+  assert(JSON.parse(text(rParse2)).iso === '2026-11-22T09:00', 'time.parse 解析「明天上午9点」');
+  const rParseNeed = await clientW.callTool({
+    name: 'time.parse',
+    arguments: { text: '昨天', now: '2026-11-21T10:00' },
+  });
+  const needDoc = JSON.parse(text(rParseNeed));
+  assert(!rParseNeed.isError && needDoc.iso === null && needDoc.needTime === true, '只有日期时 time.parse 返回 needTime，不用 00:00 代替');
+
+  const rExpBad = await clientW.callTool({ name: 'expense.create', arguments: { amount: 10, date: '2026-11-20' } });
+  assert(rExpBad.isError && /00:00|时刻/.test(text(rExpBad)), 'expense.create 拒绝纯日期（防时间被抹成 00:00）');
+  const rExpTime = await clientW.callTool({
+    name: 'expense.create',
+    arguments: { amount: 10, category: '食品', note: '牛奶', date: '2026-11-20T19:30' },
+  });
+  assert(!rExpTime.isError && JSON.parse(text(rExpTime)).date === '2026-11-20T19:30', 'expense.create 保留用户说的时刻并回显');
+
+  const rTodoBad = await clientW.callTool({ name: 'todo.create', arguments: { title: '纯日期待办', dueDate: '2026-11-22' } });
+  assert(rTodoBad.isError && /00:00|时刻/.test(text(rTodoBad)), 'todo.create 拒绝纯日期截止时间');
+  const rTodoTime = await clientW.callTool({
+    name: 'todo.create',
+    arguments: { title: '带时刻待办', dueDate: '2026-11-22T09:00' },
+  });
+  assert(!rTodoTime.isError && JSON.parse(text(rTodoTime)).dueDate === '2026-11-22T09:00', 'todo.create 保留截止时刻');
+  const todosTime = JSON.parse(text(await clientW.callTool({ name: 'todo.list', arguments: {} })));
+  assert(todosTime.items.some(t => t.title === '带时刻待办' && t.dueDate === '2026-11-22T09:00'), '待办截止时间落库为带时刻 ISO');
+
+  // 常规项目一次拆步
+  const rProjSteps = await clientW.callTool({
+    name: 'project.create',
+    arguments: { name: '装修计划', description: '三步走', steps: ['拆旧', '水电', '软装'] },
+  });
+  const stepsDoc = JSON.parse(text(rProjSteps));
+  assert(!rProjSteps.isError && stepsDoc.steps === 3 && stepsDoc.projectType === 'plan', 'project.create 支持 steps 一次拆成 3 步');
+
+  // 跟踪项目创建
+  const rTrackBad = await clientW.callTool({ name: 'project.create', arguments: { name: '缺字段跟踪', projectType: 'track' } });
+  assert(rTrackBad.isError && /trackFields/.test(text(rTrackBad)), 'project.create 跟踪项目缺 trackFields 被拒绝');
+  const rTrackCreate = await clientW.callTool({
+    name: 'project.create',
+    arguments: {
+      name: '减脂跟踪',
+      projectType: 'track',
+      trackFields: [
+        { key: 'date', name: '日期', type: 'date' },
+        { key: 'weight', name: '体重', type: 'number', unit: 'kg' },
+        { key: 'note', name: '备注', type: 'text' },
+      ],
+      trackConfig: { goal: { text: '3 个月减到 70kg', kind: 'number' }, startDate: '2026-11-21' },
+    },
+  });
+  assert(!rTrackCreate.isError && JSON.parse(text(rTrackCreate)).projectType === 'track', 'project.create 支持 projectType=track');
+
+  // 跟踪记录 / 仪表盘 / 里程碑 / 结项
+  const rRecs0 = await clientW.callTool({ name: 'tracker.records.list', arguments: { projectId: 'rec_ptrack' } });
+  assert(!rRecs0.isError && JSON.parse(text(rRecs0)).count === 1, 'tracker.records.list 读取跟踪记录');
+  const rRecNew = await clientW.callTool({
+    name: 'tracker.record.create',
+    arguments: { projectId: 'rec_ptrack', data: { date: '2026-11-21', weight: 70.8, note: '跳绳' } },
+  });
+  assert(!rRecNew.isError && JSON.parse(text(rRecNew)).recordDate === '2026-11-21', 'tracker.record.create 写入记录并按日期字段归属');
+  const newRecId = JSON.parse(text(rRecNew)).id;
+  const rRecUp = await clientW.callTool({
+    name: 'tracker.record.update',
+    arguments: { id: newRecId, data: { date: '2026-11-21', weight: 70.6, note: '跳绳 20 分钟' } },
+  });
+  assert(!rRecUp.isError, 'tracker.record.update 更新记录');
+  const rOv = await clientW.callTool({ name: 'tracker.overview', arguments: { projectId: 'rec_ptrack' } });
+  assert(!rOv.isError && JSON.parse(text(rOv)).records.total === 2, 'tracker.overview 返回仪表盘');
+
+  const rMs = await clientW.callTool({
+    name: 'tracker.milestone.set',
+    arguments: { projectId: 'rec_ptrack', id: 'm1', done: true, doneDate: '2026-11-21' },
+  });
+  assert(!rMs.isError && JSON.parse(text(rMs)).milestones[0].done === true, 'tracker.milestone.set 勾选里程碑');
+
+  const rFields = await clientW.callTool({
+    name: 'tracker.fields.update',
+    arguments: {
+      projectId: 'rec_ptrack',
+      config: { goal: { text: '减到 69kg', kind: 'number', metric: { agg: 'latest', field: 'weight' }, target: 69, unit: 'kg', direction: 'down' } },
+    },
+  });
+  assert(!rFields.isError && JSON.parse(text(rFields)).config.goal.text === '减到 69kg', 'tracker.fields.update 更新目标配置');
+
+  const rCloseBad = await clientW.callTool({ name: 'tracker.close', arguments: { projectId: 'rec_ptrack' } });
+  assert(rCloseBad.isError && /二次授权/.test(text(rCloseBad)), 'tracker.close 缺 confirm 被拒绝');
+  const rCloseOk = await clientW.callTool({
+    name: 'tracker.close',
+    arguments: { projectId: 'rec_ptrack', result: 'achieved', note: '达标', confirm: '测试跟踪' },
+  });
+  assert(!rCloseOk.isError && JSON.parse(text(rCloseOk)).report, 'tracker.close confirm=项目名后结项并返回报告');
+  const rReopen = await clientW.callTool({ name: 'tracker.reopen', arguments: { projectId: 'rec_ptrack' } });
+  assert(!rReopen.isError, 'tracker.reopen 重新打开');
+
+  const rRecDelBad = await clientW.callTool({ name: 'tracker.record.delete', arguments: { id: 'rec_tr1' } });
+  assert(rRecDelBad.isError && /二次授权/.test(text(rRecDelBad)), 'tracker.record.delete 缺 confirm 被拒绝');
+  const rRecDelMis = await clientW.callTool({ name: 'tracker.record.delete', arguments: { id: 'rec_tr1', confirm: 'x' } });
+  assert(rRecDelMis.isError && /confirm 不匹配/.test(text(rRecDelMis)), 'tracker.record.delete confirm 不匹配被拒绝');
+  const rRecDelOk = await clientW.callTool({ name: 'tracker.record.delete', arguments: { id: 'rec_tr1', confirm: '跑步3km' } });
+  assert(!rRecDelOk.isError, 'tracker.record.delete confirm=记录标题后删除');
 
   await clientW.close();
   mock.kill('SIGTERM');

@@ -461,9 +461,29 @@ async function cmdStatus(argv) {
   );
 }
 
+const INSTRUCTIONS = [
+  '购买/记账/待办/项目 MCP。所有时间都是北京时间（UTC+8）。',
+  '',
+  '【时间硬规则】写入 expense/purchase/todo 的日期与截止时间必须带时刻，格式 YYYY-MM-DDTHH:mm。',
+  '禁止只传 YYYY-MM-DD：服务端会把它存成当天 00:00，用户说的时间就被抹掉了。',
+  '- 用户说「现在/刚刚」→ 先调 time.now，用返回的 iso。',
+  '- 用户说「昨晚7点多 / 明天上午9点 / 大前天下午3点半」→ 先调 time.parse，用返回的 iso。',
+  '- time.parse 若返回 needTime=true（只有日期没时刻），必须向用户确认几点几分，不要用 00:00 代替。',
+  '- 写完工具会回显实际保存的日期时间，请核对是否与用户说的一致。',
+  '',
+  '【项目】project.create 支持 projectType=plan（P0~P5 阶段，可用 steps 一次拆成最多 6 步）和 projectType=track（长期跟踪，需 trackFields + trackConfig.goal.text）。',
+  '跟踪项目没有阶段：用 tracker.records.list/overview/record.create/record.update/record.delete/fields.update/milestone.set/close/reopen 操作。',
+  '',
+  '【安全】删除/取消/结项/终态流转等 T1 操作，必须先向用户展示一行预览，用户同意后把 confirm 设为目标的展示名（或记录 ID）再调用。',
+].join('\n');
+
 async function runStdio() {
   const { store, api } = buildRuntime();
-  const server = new McpServer({ name: 'purchase-app-mcp', version: pkg.version });
+  const server = new McpServer({
+    name: 'purchase-app-mcp',
+    version: pkg.version,
+    instructions: INSTRUCTIONS,
+  });
   registerAllTools(server, { api, log: (entry) => store.audit(entry) });
 
   store.audit({

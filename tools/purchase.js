@@ -5,6 +5,9 @@
 const { z } = require('zod');
 const { register } = require('./util');
 const { assertConfirm } = require('../lib/confirm');
+const { normalizeDateTime } = require('../lib/time');
+
+const DATE_DESC = '北京时间，必须带时刻：YYYY-MM-DDTHH:mm（如 2026-11-20T19:30）。禁止只传 YYYY-MM-DD——会被存成当天 00:00，时间就丢了。用户说「昨晚7点多」请先用 time.parse。';
 const {
   applyFilters, requireField, loadPurchaseRead,
   LEGACY_STATUSES, NEED_STATUSES, ORDER_STATUSES,
@@ -99,7 +102,7 @@ module.exports = function registerPurchase(server, ctx) {
       price: z.number().optional().describe('单价'),
       qty: z.number().int().positive().optional().describe('数量，默认 1'),
       status: z.string().optional().describe('状态，默认待审批'),
-      date: z.string().optional().describe('日期（ISO 字符串，如 2026-10-22）'),
+      date: z.string().optional().describe(DATE_DESC),
       note: z.string().optional(),
       evalSummary: z.string().optional().describe('评估摘要'),
       buyReason: z.string().optional().describe('购买理由'),
@@ -128,8 +131,12 @@ module.exports = function registerPurchase(server, ctx) {
       const r = await api.post('/api/needs', body);
       return { ok: true, id: r && r.id, source: 'needs', status: '对比中' };
     }
-    const r = await api.post('/api/items', a);
-    return { ok: true, id: r && r.id };
+    const body = { ...a };
+    if (body.date !== undefined && body.date !== null && body.date !== '') {
+      body.date = normalizeDateTime(body.date, '采购日期').iso;
+    }
+    const r = await api.post('/api/items', body);
+    return { ok: true, id: r && r.id, ...(body.date ? { date: body.date } : {}) };
   });
 
   register(server, ctx, 'purchase.update', {
@@ -143,7 +150,7 @@ module.exports = function registerPurchase(server, ctx) {
       price: z.number().optional(),
       qty: z.number().int().positive().optional(),
       status: z.string().optional(),
-      date: z.string().optional(),
+      date: z.string().optional().describe(DATE_DESC),
       setDate: z.boolean().optional().describe('把日期设为当前时间'),
       note: z.string().optional(),
       evalSummary: z.string().optional().describe('旧名；等价于综合推荐 recommendation'),
@@ -169,11 +176,14 @@ module.exports = function registerPurchase(server, ctx) {
         '将「' + item.name + '」状态写为 ' + a.status + '（终态，历史账目冻结）');
     }
     const body = { ...a };
+    if (body.date !== undefined && body.date !== null && body.date !== '') {
+      body.date = normalizeDateTime(body.date, '采购日期').iso;
+    }
     // agent 友好名 → 服务端字段（/api/items PUT）
     if (a.recommendation !== undefined) body.evalSummary = a.recommendation;
     if (a.recommendSupplierId !== undefined) body.recommendSupplierId = a.recommendSupplierId;
     await api.put('/api/items', body);
-    return { ok: true };
+    return { ok: true, ...(body.date ? { date: body.date } : {}) };
   });
 
   register(server, ctx, 'purchase.delete', {
@@ -210,7 +220,7 @@ module.exports = function registerPurchase(server, ctx) {
       installmentAmount: z.number().optional(),
       installmentStart: z.string().optional(),
       installmentPaid: z.number().int().min(0).optional(),
-      date: z.string().optional(),
+      date: z.string().optional().describe(DATE_DESC),
       note: z.string().optional(),
     },
   }, async (a) => {
@@ -219,6 +229,9 @@ module.exports = function registerPurchase(server, ctx) {
     const body = { supplierId: a.supplierId, mode: a.mode || 'new' };
     for (const k of ['pricePaid', 'qty', 'installments', 'installmentAmount', 'installmentStart', 'installmentPaid', 'date', 'note']) {
       if (a[k] !== undefined) body[k] = a[k];
+    }
+    if (body.date !== undefined && body.date !== null && body.date !== '') {
+      body.date = normalizeDateTime(body.date, '采购日期').iso;
     }
     const r = await api.post('/api/needs/' + encodeURIComponent(a.needId) + '/decide', body);
     return { ok: true, ...(r && typeof r === 'object' ? r : {}) };
@@ -368,7 +381,7 @@ module.exports = function registerPurchase(server, ctx) {
       installmentAmount: z.number().optional(),
       installmentStart: z.string().optional(),
       installmentPaid: z.number().int().min(0).optional(),
-      date: z.string().optional(),
+      date: z.string().optional().describe(DATE_DESC),
       note: z.string().optional(),
       setDate: z.boolean().optional(),
       image: z.string().optional(),
@@ -380,8 +393,11 @@ module.exports = function registerPurchase(server, ctx) {
     for (const k of ORDER_FIELDS) {
       if (a[k] !== undefined) body[k] = a[k];
     }
+    if (body.date !== undefined && body.date !== null && body.date !== '') {
+      body.date = normalizeDateTime(body.date, '采购日期').iso;
+    }
     if (!Object.keys(body).length) throw new Error('没有要更新的字段');
     await api.put('/api/orders/' + encodeURIComponent(a.id), body);
-    return { ok: true };
+    return { ok: true, ...(body.date ? { date: body.date } : {}) };
   });
 };

@@ -4,6 +4,9 @@ const { z } = require('zod');
 const { register } = require('./util');
 const { requireField, sortNewestFirst } = require('../lib/datamap');
 const { assertConfirm } = require('../lib/confirm');
+const { normalizeDateTime } = require('../lib/time');
+
+const DUE_DESC = '北京时间，必须带时刻：YYYY-MM-DDTHH:mm（如 2026-11-21T09:00）。禁止只传 YYYY-MM-DD——会被当成 00:00。用户说「明天上午9点」请先用 time.parse。';
 
 function filter(rows, { status, category, priority, projectId, keyword, limit } = {}) {
   let out = rows;
@@ -43,11 +46,11 @@ module.exports = function registerTodo(server, ctx) {
 
   register(server, ctx, 'todo.create', {
     title: '新建待办',
-    description: '新增待办。repeat 为每天/每周/每月时，完成后服务端自动生成下一条。',
+    description: '新增待办。repeat 为每天/每周/每月时，完成后服务端自动生成下一条。dueDate 必须带北京时间时刻（YYYY-MM-DDTHH:mm）；返回值会回显实际写入的截止时间。',
     inputSchema: {
       title: z.string(),
       description: z.string().optional(),
-      dueDate: z.string().optional().describe('截止日期 ISO 字符串'),
+      dueDate: z.string().optional().describe(DUE_DESC),
       priority: z.string().optional().describe('高/中/低，默认中'),
       category: z.string().optional(),
       status: z.string().optional().describe('默认待办'),
@@ -61,8 +64,12 @@ module.exports = function registerTodo(server, ctx) {
     },
   }, async (a) => {
     requireField(a, 'title');
-    const r = await api.post('/api/todos', a);
-    return { ok: true, id: r && r.id };
+    const body = { ...a };
+    if (body.dueDate !== undefined && body.dueDate !== null && body.dueDate !== '') {
+      body.dueDate = normalizeDateTime(body.dueDate, '截止时间').iso;
+    }
+    const r = await api.post('/api/todos', body);
+    return { ok: true, id: r && r.id, ...(body.dueDate ? { dueDate: body.dueDate } : {}) };
   });
 
   register(server, ctx, 'todo.update', {
@@ -72,7 +79,7 @@ module.exports = function registerTodo(server, ctx) {
       id: z.string(),
       title: z.string().optional(),
       description: z.string().optional(),
-      dueDate: z.string().optional(),
+      dueDate: z.string().optional().describe(DUE_DESC),
       priority: z.string().optional(),
       category: z.string().optional(),
       status: z.string().optional(),
@@ -87,8 +94,12 @@ module.exports = function registerTodo(server, ctx) {
     },
   }, async (a) => {
     requireField(a, 'id');
-    const r = await api.put('/api/todos', a);
-    return { ok: true, renewed: !!(r && r.renewed) };
+    const body = { ...a };
+    if (body.dueDate !== undefined && body.dueDate !== null && body.dueDate !== '') {
+      body.dueDate = normalizeDateTime(body.dueDate, '截止时间').iso;
+    }
+    const r = await api.put('/api/todos', body);
+    return { ok: true, renewed: !!(r && r.renewed), ...(body.dueDate ? { dueDate: body.dueDate } : {}) };
   });
 
   register(server, ctx, 'todo.delete', {

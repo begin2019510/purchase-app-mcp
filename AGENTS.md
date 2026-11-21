@@ -68,7 +68,16 @@ npx -y github:begin2019510/purchase-app-mcp logout
 6. 不要自行重启 ttyd / tmux 等父进程；需要重启的情况把命令交给用户在独立会话执行。
 7. 票据、凭据都按「哪个 agent 用就由哪个 agent 自己持有」处理，禁止在 agent 之间共享同一个 token。
 
-## 工具（35 个）
+## 时间规则（v1.5.0 硬要求）
+
+记账 / 采购 / 待办的日期**必须带时刻**，用北京时间 `YYYY-MM-DDTHH:mm`。纯日期会被服务端存成 00:00，等于丢掉用户说的时间；MCP 从 v1.5.0 起直接拒绝纯日期。
+
+1. 用户说「昨晚 7 点多」→ 先 `time.parse({ text: '昨晚7点多' })` → 用返回的 `iso` 写入，不要心算。
+2. `time.parse` 返回 `needTime: true`（只有日期）→ 先问用户几点，禁止用 00:00 代替。
+3. 不确定当前北京时间 → 先 `time.now`。
+4. 只有「项目截止日 / 跟踪记录日期字段」允许只到天。
+
+## 工具（46 个）
 
 - 采购：`purchase.list/get/create/update/delete`、`purchase.decide/undecided/cancel`
   - `purchase.update` 可写综合推荐：`recommendation` + `recommendSupplierId`（T0）
@@ -79,6 +88,9 @@ npx -y github:begin2019510/purchase-app-mcp logout
 - 记账：`expense.list/create/update/delete`
 - 待办：`todo.list/create/update/delete`
 - 项目：`project.list/get/create/update/delete`、`phase.list`、`phase.status.set`
+  - `project.create` 支持 `projectType: 'plan' | 'track'`；阶段计划可传 `steps`（最多 6 步）一次拆分；跟踪项目需 `trackFields` + `trackConfig.goal.text`。
+  - 跟踪项目还可用：`tracker.records.list`、`tracker.overview`、`tracker.record.create/update/delete`、`tracker.fields.update`、`tracker.milestone.set`、`tracker.close`、`tracker.reopen`。
+- 时间：`time.now`、`time.parse`（只读，写入前把中文时间转成北京时间 ISO）
 - 预算：`budget.get`、`budget.save`
 - 重复项/分类：`recurring.list/update`、`cats.list/update`
 - 统计：`analytics.summary`
@@ -93,6 +105,8 @@ npx -y github:begin2019510/purchase-app-mcp logout
 | `project.delete` | 项目名称 |
 | `expense.delete` | 备注（无备注则 ID） |
 | `todo.delete(purge=true)` | 待办标题 |
+| `tracker.close` | 跟踪项目名称 |
+| `tracker.record.delete` | 记录标题（无标题则日期或记录 ID） |
 | `cats.update` / `recurring.update` | `覆盖确认` |
 
 `phase.*` 需要 App **3.0.0+**（含此前的 4.0.52–4.0.61）。若返回「接口返回了网页而不是 JSON」，说明目标 App 版本过旧：不要声称成功，先让用户升级 App。

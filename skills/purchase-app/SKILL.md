@@ -118,10 +118,20 @@ npx -y github:begin2019510/purchase-app-mcp status
 只读优先：`purchase.list`、`expense.list`、`todo.list`、`project.list`、`budget.get`、`analytics.summary`。
 `purchase.list/get` 与 `analytics.summary` 优先读 `/api/needs`（needStatus + 全部 orders/suppliers）；旧 App 自动回退 `/api/items`。`status` 可用需求状态/子单状态/旧 8 态。列表统一按日期倒序（最新在前），`limit=N` 恒为最新 N 条。
 
+### 时间铁律（v1.5.0）
+
+**记账 / 采购 / 待办必须写北京时间 `YYYY-MM-DDTHH:mm`，禁止只写日期。** 纯日期会被服务端存成 00:00，用户说的时间就丢了；MCP 现在会直接拒绝纯日期。
+
+1. 「昨天晚上 7 点多买了牛奶」→ `time.parse({ text: '昨天晚上7点多' })` → 得到 `2026-11-20T19:00` → `expense.create({ amount: 10, date: '2026-11-20T19:00', ... })`。
+2. 用户只说日期没说时刻 → `time.parse` 返回 `needTime: true` → **先问几点**，不要用 00:00 代替、也不要自己编。
+3. 不确定今天几号/现在几点 → 先 `time.now`（返回北京时间、星期、时区）。
+4. 只有项目截止日、跟踪记录的日期字段可以只到天。
+5. 写入后检查工具回显的 `date`/`dueDate` 是否与用户说的一致；不一致就改，不要声称成功。
+
 写操作分层：
 
-- **T0（直接写）**：`purchase.create`（含 `compareOnly`）、`purchase.decide`、`supplier.add/update`、`order.transition` 正向、`order.update`、`expense.create/update`、`todo.create/update` 与软删、`project.create/update`、`budget.save`、`phase.status.set`、普通字段 `purchase.update`。用户描述意图后即可执行。
-- **T1（二次授权）**：`purchase.delete/cancel/undecided`、终态 `purchase.update`、`supplier.delete`、`order.transition`→已退/已取消/已归档、`project.delete`、`expense.delete`、`todo.delete(purge=true)`、`cats.update`、`recurring.update`。
+- **T0（直接写）**：`purchase.create`（含 `compareOnly`）、`purchase.decide`、`supplier.add/update`、`order.transition` 正向、`order.update`、`expense.create/update`、`todo.create/update` 与软删、`project.create/update`、`tracker.record.create/update`、`tracker.fields.update`、`tracker.milestone.set`、`tracker.reopen`、`budget.save`、`phase.status.set`、普通字段 `purchase.update`。用户描述意图后即可执行。
+- **T1（二次授权）**：`purchase.delete/cancel/undecided`、终态 `purchase.update`、`supplier.delete`、`order.transition`→已退/已取消/已归档、`project.delete`、`expense.delete`、`todo.delete(purge=true)`、`tracker.record.delete`、`tracker.close`、`cats.update`、`recurring.update`。
 
 **T1 铁律**：先给用户一行预览（对象 + 后果 + 不可逆点）→ 等明确同意 → 再调用并传 `confirm`：
 
@@ -133,6 +143,8 @@ npx -y github:begin2019510/purchase-app-mcp status
 | 项目删除 | 项目名称 |
 | 记账删除 | 备注（无备注则 ID） |
 | 待办硬删 | 待办标题 |
+| 跟踪项目结项 | 跟踪项目名称 |
+| 删除跟踪记录 | 记录标题（无标题则日期或记录 ID） |
 | 分类/重复项覆盖 | `覆盖确认` |
 
 不传或传错 `confirm` 时 MCP 会报错并附目标摘要，**不会执行**。诚实边界：MCP 无法验证用户是否真的点头——请把预览写进对话，让同意可见。
@@ -181,6 +193,36 @@ purchase.update({
   recommendSupplierId: 'rec_s…'   // 清除则传 ''
 })
 ```
+
+### 项目：阶段计划拆步 / 长期跟踪
+
+**阶段计划项目**：`project.create({ name, steps: ['选址', '装修', '采购设备'] })` 一次拆成最多 6 步；每步可写 `{ name, budget, plannedDays }`。适合「把一件事分成几步做」。
+
+**长期跟踪项目**（健身、读书、求职、习惯）：先读模板/字段，再建：
+
+```text
+project.create({
+  name: '减重到 70kg',
+  projectType: 'track',
+  trackFields: [
+    { key: 'date', name: '日期', type: 'date', required: true },
+    { key: 'weight', name: '体重', type: 'number', unit: 'kg' },
+    { key: 'note', name: '备注', type: 'text' }
+  ],
+  trackConfig: {
+    goal: { text: '减到 70kg' },
+    startDate: '2026-11-21',
+    targetDate: '2027-03-01',
+    week: { target: 3 },
+    milestones: [{ id: 'm1', title: '减到 75kg' }],
+    dateField: 'date', titleField: 'weight'
+  }
+})
+```
+
+日常记录：`tracker.record.create({ projectId, data: { date: '2026-11-21', weight: 71.2, note: '跑步 3km' } })`（`date` 可只到天）。
+看进度：`tracker.overview` / `tracker.records.list`。勾里程碑：`tracker.milestone.set`。
+结项：先给一行预览，用户同意后 `tracker.close({ projectId, confirm: '减重到 70kg', result, note })`；结错可 `tracker.reopen`。
 
 注意：`phase.status.set` 依赖 App 公网的 `/api/phases`。App 3.0.0+（含此前 4.0.52–4.0.61）已部署该端点；若返回“接口返回了网页而不是 JSON”，说明目标 App 版本过旧，**不要声称成功**，先让用户升级 App。
 
